@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sportmaster Card Agent — Pipeline Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e17;
+  --surface: #111827;
+  --surface-2: #1a2234;
+  --border: #1e2d4a;
+  --text: #e2e8f0;
+  --text-dim: #64748b;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.15);
+  --green: #22c55e;
+  --green-glow: rgba(34, 197, 94, 0.12);
+  --orange: #f59e0b;
+  --red: #ef4444;
+  --purple: #a78bfa;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Background grid */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image:
+    linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Header */
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.logo {
+  width: 44px; height: 44px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: white;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+header h1 span { color: var(--text-dim); font-weight: 300; }
+
+.status-badge {
+  margin-left: auto;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-badge.ready { background: var(--green-glow); color: var(--green); border: 1px solid rgba(34,197,94,0.2); }
+.status-badge.running { background: var(--accent-glow); color: var(--accent); border: 1px solid rgba(59,130,246,0.2); animation: pulse 2s infinite; }
+.status-badge.done { background: var(--green-glow); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+/* Layout */
+.layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 24px;
+}
+
+/* Input Panel */
+.input-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  height: fit-content;
+  position: sticky;
+  top: 24px;
+}
+
+.input-panel h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field input, .field textarea, .field select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: 'Outfit', sans-serif;
+  transition: border-color 0.2s;
+}
+
+.field input:focus, .field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.field textarea { resize: vertical; min-height: 60px; }
+
+.platforms-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.platform-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+}
+
+.platform-toggle:hover { border-color: var(--accent); }
+.platform-toggle.active { border-color: var(--accent); background: var(--accent-glow); }
+.platform-toggle input { display: none; }
+
+.platform-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: background 0.2s;
+}
+
+.platform-toggle.active .platform-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+.btn-generate {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  transition: all 0.3s;
+  letter-spacing: 0.02em;
+  margin-top: 8px;
+}
+
+.btn-generate:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(59,130,246,0.3); }
+.btn-generate:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* Pipeline Panel */
+.pipeline-panel { min-height: 400px; }
+
+/* Agent Steps */
+.agent-step {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: all 0.3s;
+  opacity: 0.4;
+}
+
+.agent-step.active {
+  opacity: 1;
+  border-color: var(--accent);
+  box-shadow: 0 0 20px var(--accent-glow);
+  animation: slideIn 0.3s ease;
+}
+
+.agent-step.done {
+  opacity: 1;
+  border-color: rgba(34,197,94,0.3);
+}
+
+.agent-step.error { opacity: 1; border-color: var(--red); }
+
+@keyframes slideIn {
+  from { transform: translateX(-8px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.step-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+
+.step-icon.pending { background: var(--surface-2); color: var(--text-dim); }
+.step-icon.active { background: var(--accent); color: white; animation: pulse 1.5s infinite; }
+.step-icon.done { background: var(--green); color: white; }
+
+.step-info { flex: 1; min-width: 0; }
+.step-name { font-weight: 600; font-size: 14px; }
+.step-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+
+.step-result {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--green);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-duration {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* Platform Results */
+.platform-results {
+  margin-top: 24px;
+}
+
+.platform-result {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  animation: fadeIn 0.4s ease;
+}
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+.platform-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--surface-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.platform-header:hover { background: rgba(26,34,52,0.8); }
+
+.platform-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+}
+
+.platform-badge.sm_site { background: rgba(59,130,246,0.15); color: var(--accent); }
+.platform-badge.wb { background: rgba(168,85,247,0.15); color: #a855f7; }
+.platform-badge.ozon { background: rgba(34,197,94,0.15); color: var(--green); }
+.platform-badge.lamoda { background: rgba(236,72,153,0.15); color: #ec4899; }
+.platform-badge.yandex_market { background: rgba(245,158,11,0.15); color: var(--orange); }
+
+.platform-title { flex: 1; font-weight: 600; }
+
+.quality-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.quality-badge.pass { background: var(--green-glow); color: var(--green); }
+.quality-badge.fail { background: rgba(239,68,68,0.12); color: var(--red); }
+
+.platform-body {
+  padding: 20px;
+  display: none;
+}
+
+.platform-body.open { display: block; }
+
+.content-section {
+  margin-bottom: 16px;
+}
+
+.content-section h4 {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: 'JetBrains Mono', monospace;
+  margin-bottom: 8px;
+}
+
+.content-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.content-text :is(h2,h3) { font-size: 15px; margin: 12px 0 6px; color: var(--accent); }
+.content-text ul { padding-left: 20px; }
+.content-text li { margin-bottom: 4px; }
+
+.benefit-item {
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.benefit-title { font-weight: 600; font-size: 13px; color: var(--accent); }
+.benefit-desc { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
+
+.seo-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seo-tag {
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-dim);
+}
+
+/* Timer */
+.timer {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+
+.timer span { color: var(--accent); font-weight: 600; }
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--text-dim);
+}
+
+.empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.3; }
+.empty-state p { font-size: 15px; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .input-panel { position: static; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="logo">SM</div>
+    <h1>Card Agent <span>Pipeline Dashboard</span></h1>
+    <div class="status-badge ready" id="statusBadge">READY</div>
+  </header>
+
+  <div class="layout">
+    <!-- Input Panel -->
+    <div class="input-panel">
+      <h2>Товар</h2>
+      <div class="field">
+        <label>МЦМ ID</label>
+        <input id="mcm_id" value="MCM-TORNEO-T165-001">
+      </div>
+      <div class="field">
+        <label>Бренд</label>
+        <input id="brand" value="Torneo">
+      </div>
+      <div class="field">
+        <label>Категория</label>
+        <input id="category" value="Кардиотренажёры">
+      </div>
+      <div class="field">
+        <label>Группа товаров</label>
+        <input id="product_group" value="Беговые дорожки">
+      </div>
+      <div class="field">
+        <label>Подгруппа</label>
+        <input id="product_subgroup" value="Электрические беговые дорожки">
+      </div>
+      <div class="field">
+        <label>Название</label>
+        <input id="product_name" value="Torneo T-165 Shape">
+      </div>
+      <div class="field">
+        <label>Описание</label>
+        <textarea id="description">Электрическая беговая дорожка для домашних тренировок</textarea>
+      </div>
+      <div class="field">
+        <label>Технологии (через запятую)</label>
+        <input id="technologies" value="Shock Absorbing System, Quick Speed Control">
+      </div>
+
+      <h2 style="margin-top: 20px">Площадки</h2>
+      <div class="platforms-grid" id="platformsGrid">
+        <label class="platform-toggle active" data-pid="sm_site">
+          <input type="checkbox" checked><div class="platform-dot"></div>SM сайт
+        </label>
+        <label class="platform-toggle active" data-pid="wb">
+          <input type="checkbox" checked><div class="platform-dot"></div>Wildberries
+        </label>
+        <label class="platform-toggle active" data-pid="ozon">
+          <input type="checkbox" checked><div class="platform-dot"></div>Ozon
+        </label>
+        <label class="platform-toggle" data-pid="lamoda">
+          <input type="checkbox"><div class="platform-dot"></div>Lamoda
+        </label>
+        <label class="platform-toggle" data-pid="yandex_market">
+          <input type="checkbox"><div class="platform-dot"></div>Яндекс.Маркет
+        </label>
+      </div>
+
+      <button class="btn-generate" id="btnGenerate" onclick="startPipeline()">
+        Запустить генерацию
+      </button>
+    </div>
+
+    <!-- Pipeline Panel -->
+    <div class="pipeline-panel" id="pipelinePanel">
+      <div class="empty-state" id="emptyState">
+        <div class="icon">⚡</div>
+        <p>Заполните данные товара и нажмите «Запустить генерацию»</p>
+        <p style="margin-top:8px;font-size:12px;">Пайплайн из 15 агентов обогатит данные и сгенерирует уникальный контент для каждой площадки</p>
+      </div>
+      <div id="timerBar" class="timer" style="display:none">
+        Время: <span id="timerValue">0</span>с
+      </div>
+      <div id="agentSteps"></div>
+      <div id="platformResults" class="platform-results"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Platform toggles
+document.querySelectorAll('.platform-toggle').forEach(el => {
+  el.addEventListener('click', () => {
+    el.classList.toggle('active');
+    el.querySelector('input').checked = el.classList.contains('active');
+  });
+});
+
+let timerInterval = null;
+let startTime = 0;
+
+function getSelectedPlatforms() {
+  return [...document.querySelectorAll('.platform-toggle.active')].map(el => el.dataset.pid);
+}
+
+function getProductData() {
+  const techs = document.getElementById('technologies').value;
+  return {
+    mcm_id: document.getElementById('mcm_id').value,
+    brand: document.getElementById('brand').value,
+    category: document.getElementById('category').value,
+    product_group: document.getElementById('product_group').value,
+    product_subgroup: document.getElementById('product_subgroup').value,
+    product_name: document.getElementById('product_name').value,
+    description: document.getElementById('description').value,
+    technologies: techs ? techs.split(',').map(s => s.trim()).filter(Boolean) : null,
+    gender: "Унисекс",
+    color: "Чёрный",
+    assortment_type: "Basic",
+    assortment_level: "Mid",
+  };
+}
+
+async function startPipeline() {
+  const btn = document.getElementById('btnGenerate');
+  btn.disabled = true;
+  btn.textContent = 'Генерация...';
+
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('agentSteps').innerHTML = '';
+  document.getElementById('platformResults').innerHTML = '';
+
+  const badge = document.getElementById('statusBadge');
+  badge.className = 'status-badge running';
+  badge.textContent = 'RUNNING';
+
+  // Timer
+  startTime = Date.now();
+  document.getElementById('timerBar').style.display = 'block';
+  timerInterval = setInterval(() => {
+    document.getElementById('timerValue').textContent = Math.round((Date.now() - startTime) / 1000);
+  }, 500);
+
+  const product = getProductData();
+  const platforms = getSelectedPlatforms();
+
+  try {
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product, platforms }),
+    });
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          const eventType = line.slice(6).trim();
+          continue;
+        }
+        if (line.startsWith('data:')) {
+          try {
+            const data = JSON.parse(line.slice(5).trim());
+            handleEvent(data);
+          } catch {}
+        }
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  clearInterval(timerInterval);
+  btn.disabled = false;
+  btn.textContent = 'Запустить генерацию';
+}
+
+function handleEvent(rawData) {
+  // SSE-starlette wraps: we get the event from the SSE format
+  // The actual data comes in `data` field
+  let eventType, data;
+
+  if (typeof rawData === 'string') {
+    try { rawData = JSON.parse(rawData); } catch { return; }
+  }
+
+  // Handle SSE wrapper
+  if (rawData.event && rawData.data) {
+    eventType = rawData.event;
+    data = typeof rawData.data === 'string' ? JSON.parse(rawData.data) : rawData.data;
+  } else {
+    // Direct event data
+    eventType = rawData.event || rawData.type || 'unknown';
+    data = rawData;
+  }
+
+  const stepsDiv = document.getElementById('agentSteps');
+
+  if (eventType === 'agent_start') {
+    const el = document.createElement('div');
+    el.className = 'agent-step active';
+    el.id = `step-${data.agent}`;
+    el.innerHTML = `
+      <div class="step-icon active">${data.step || '•'}</div>
+      <div class="step-info">
+        <div class="step-name">${data.agent}</div>
+        <div class="step-desc">${data.description || ''}</div>
+      </div>
+      <div class="step-duration">⏳</div>
+    `;
+    stepsDiv.appendChild(el);
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  if (eventType === 'agent_done') {
+    const el = document.getElementById(`step-${data.agent}`);
+    if (el) {
+      el.className = 'agent-step done';
+      el.querySelector('.step-icon').className = 'step-icon done';
+      el.querySelector('.step-icon').textContent = '✓';
+      el.querySelector('.step-duration').textContent = `${data.duration}s`;
+
+      if (data.result) {
+        const resultStr = Object.entries(data.result)
+          .map(([k,v]) => `${k}: ${Array.isArray(v) ? v.slice(0,2).join(', ') : v}`)
+          .join(' · ');
+        const resultEl = document.createElement('div');
+        resultEl.className = 'step-result';
+        resultEl.textContent = resultStr;
+        el.querySelector('.step-info').appendChild(resultEl);
+      }
+    }
+  }
+
+  if (eventType === 'platform_done') {
+    renderPlatformResult(data);
+  }
+
+  if (eventType === 'done') {
+    const badge = document.getElementById('statusBadge');
+    badge.className = 'status-badge done';
+    badge.textContent = data.all_passed_quality ? 'ALL PASSED' : 'DONE';
+    clearInterval(timerInterval);
+  }
+}
+
+function renderPlatformResult(data) {
+  const container = document.getElementById('platformResults');
+  const pid = data.platform;
+  const content = data.content;
+  const quality = data.quality;
+
+  const el = document.createElement('div');
+  el.className = 'platform-result';
+
+  const qualityClass = quality.passed ? 'pass' : 'fail';
+  const qualityText = `${(quality.overall * 100).toFixed(0)}%`;
+
+  let benefitsHtml = '';
+  if (content.benefits) {
+    benefitsHtml = content.benefits.map(b => `
+      <div class="benefit-item">
+        <div class="benefit-title">${b.title}</div>
+        <div class="benefit-desc">${b.description}</div>
+      </div>
+    `).join('');
+  }
+
+  let seoTagsHtml = '';
+  if (content.seo_keywords) {
+    seoTagsHtml = content.seo_keywords.map(k => `<span class="seo-tag">${k}</span>`).join('');
+  }
+
+  el.innerHTML = `
+    <div class="platform-header" onclick="this.nextElementSibling.classList.toggle('open')">
+      <span class="platform-badge ${pid}">${pid.toUpperCase()}</span>
+      <span class="platform-title">${content.title}</span>
+      <span class="quality-badge ${qualityClass}">Q: ${qualityText}</span>
+    </div>
+    <div class="platform-body open">
+      <div class="content-section">
+        <h4>Описание (${content.description.length} символов)</h4>
+        <div class="content-text">${content.description}</div>
+      </div>
+      <div class="content-section">
+        <h4>Бенефиты (${content.benefits ? content.benefits.length : 0})</h4>
+        ${benefitsHtml}
+      </div>
+      <div class="content-section">
+        <h4>SEO</h4>
+        <div style="margin-bottom:8px"><strong>Title:</strong> ${content.seo_title}</div>
+        <div style="margin-bottom:8px"><strong>Meta:</strong> ${content.seo_meta}</div>
+        <div class="seo-tags">${seoTagsHtml}</div>
+      </div>
+    </div>
+  `;
+
+  container.appendChild(el);
+}
+</script>
+</body>
+</html>
