@@ -104,10 +104,11 @@ class CopyEditorAgent:
             whitespace. All other fields (benefits, seo_keywords, hashes)
             are passed through unchanged.
         """
-        if self._is_llm_mode():
-            return self._edit_with_llm(
-                content, max_description_length, max_title_length,
-            )
+        # Rule-based agent — always use deterministic logic (no LLM needed)
+        # if self._is_llm_mode():
+        #     return self._edit_with_llm(
+        #     content, max_description_length, max_title_length,
+        #     )
         return self._edit_stub(content, max_description_length, max_title_length)
 
     # ------------------------------------------------------------------

@@ -186,8 +186,9 @@ class InternalResearcherAgent:
                 >>> insights.mcm_id == footwear_product.mcm_id
                 True
         """
-        if self._is_llm_mode():
-            return self._research_with_llm(product)
+        # Rule-based agent — always use deterministic logic (no LLM needed)
+        # if self._is_llm_mode():
+        #     return self._research_with_llm(product)
         return self._research_stub(product)
 
     # ------------------------------------------------------------------

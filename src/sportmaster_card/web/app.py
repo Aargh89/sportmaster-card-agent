@@ -106,24 +106,136 @@ def _run_pipeline(session_id: str, product_data: dict, platforms: list[str]):
         "result": {"attributes": len(extracted), "mode": "stub (no photo)"}
     })
 
-    # ExternalResearcher
+    # --- External Research: WB and Ozon as SEPARATE steps ---
+    from sportmaster_card.models.enrichment import CompetitorCard, CompetitorBenchmark
+    from sportmaster_card.tools.wb_search import wb_search, build_search_queries
+    from sportmaster_card.tools.ozon_search import ozon_search
+    from collections import Counter
+
+    all_competitors = []
+    ext_prov = []
+    benchmark = None
+
+    # Step 4a: Wildberries
     _send_event(session_id, "agent_start", {
-        "agent": "ExternalResearcher", "step": 4, "total": 15,
-        "description": "Парсинг конкурентов на WB и Ozon"
+        "agent": "WB Search", "step": 4, "total": 17,
+        "description": "Поиск конкурентов на Wildberries"
     })
-    from sportmaster_card.agents.external_researcher import ExternalResearcherAgent
-    researcher = ExternalResearcherAgent()
     t0 = time.time()
-    benchmark, ext_prov = researcher.research(product)
+    wb_results = []
+    try:
+        queries = build_search_queries(
+            brand=product.brand, product_name=product.product_name,
+            category=product.category, product_subgroup=product.product_subgroup,
+            technologies=product.technologies,
+        )
+        for q in queries[:2]:  # Max 2 queries to reduce rate limit risk
+            wb_results = wb_search(query=q, max_results=5, min_rating=4.0, retry_delay=2, max_versions=2)
+            if wb_results:
+                break
+            time.sleep(1)
+    except Exception as e:
+        logger.warning("WB search failed: %s", e)
+
+    wb_cards = []
+    for wp in wb_results:
+        card = CompetitorCard(
+            platform="wb", product_name=f"{wp.brand} {wp.name}",
+            description=wp.description or f"★{wp.rating} · {wp.feedbacks} отзывов",
+            price=float(wp.price), rating=wp.rating,
+            key_features=[f"Цена: {wp.price}₽", f"★{wp.rating}", f"{wp.feedbacks} отзывов"],
+            url=wp.url,
+        )
+        wb_cards.append(card)
+        all_competitors.append(card)
+
     _send_event(session_id, "agent_done", {
-        "agent": "ExternalResearcher", "step": 4,
+        "agent": "WB Search", "step": 4,
         "duration": round(time.time() - t0, 1),
         "result": {
-            "competitors": len(benchmark.competitors),
-            "avg_price": f"{benchmark.average_price:.0f}₽" if benchmark.average_price else "N/A",
-            "summary": benchmark.benchmark_summary[:100],
+            "found": len(wb_cards),
+            "status": f"{len(wb_cards)} товаров" if wb_cards else "rate limit / нет результатов",
+            "top": f"{wb_cards[0].product_name[:50]} — {wb_cards[0].price:.0f}₽" if wb_cards else "—",
         }
     })
+
+    # Step 4b: Ozon
+    _send_event(session_id, "agent_start", {
+        "agent": "Ozon Search", "step": "4b", "total": 17,
+        "description": "Поиск конкурентов на Ozon"
+    })
+    t0 = time.time()
+    ozon_results = []
+    try:
+        ozon_query = f"{product.brand} {product.product_subgroup}"
+        ozon_results = ozon_search(query=ozon_query, max_results=5, min_rating=4.0)
+    except Exception as e:
+        logger.warning("Ozon search failed: %s", e)
+
+    ozon_cards = []
+    for op in ozon_results:
+        card = CompetitorCard(
+            platform="ozon",
+            product_name=f"{op.brand} {op.name}" if op.brand else op.name,
+            description=f"★{op.rating}" if op.rating else "",
+            price=float(op.price) if op.price else None,
+            rating=op.rating,
+            key_features=[f"Цена: {op.price}₽"] if op.price else [],
+            url=op.url,
+        )
+        ozon_cards.append(card)
+        all_competitors.append(card)
+
+    _send_event(session_id, "agent_done", {
+        "agent": "Ozon Search", "step": "4b",
+        "duration": round(time.time() - t0, 1),
+        "result": {
+            "found": len(ozon_cards),
+            "status": f"{len(ozon_cards)} товаров" if ozon_cards else "anti-bot / нет результатов",
+            "top": f"{ozon_cards[0].product_name[:50]}" if ozon_cards else "—",
+        }
+    })
+
+    # Step 4c: LLM fallback if no API results
+    from sportmaster_card.models.provenance import DataProvenance, SourceType
+    from datetime import datetime
+
+    if not all_competitors:
+        _send_event(session_id, "agent_start", {
+            "agent": "LLM Research", "step": "4c", "total": 17,
+            "description": "API недоступен → LLM ищет конкурентов из своих знаний"
+        })
+        t0 = time.time()
+        from sportmaster_card.agents.external_researcher import ExternalResearcherAgent
+        researcher = ExternalResearcherAgent()
+        benchmark, ext_prov = researcher._research_with_llm(product)
+        all_competitors = benchmark.competitors
+        _send_event(session_id, "agent_done", {
+            "agent": "LLM Research", "step": "4c",
+            "duration": round(time.time() - t0, 1),
+            "result": {
+                "found": len(all_competitors),
+                "source": "LLM knowledge",
+                "summary": benchmark.benchmark_summary[:80],
+            }
+        })
+
+    prices = [c.price for c in all_competitors if c.price]
+    avg_price = sum(prices) / len(prices) if prices else None
+
+    if not benchmark:
+        benchmark = CompetitorBenchmark(
+            mcm_id=product.mcm_id, competitors=all_competitors,
+            benchmark_summary=f"WB: {len(wb_cards)}, Ozon: {len(ozon_cards)}. Средняя цена: {avg_price:.0f}₽" if avg_price else f"WB: {len(wb_cards)}, Ozon: {len(ozon_cards)}",
+            average_price=avg_price,
+        )
+    for c in all_competitors:
+        ext_prov.append(DataProvenance(
+            attribute_name="competitor_card", value=c.product_name,
+            source_type=SourceType.EXTERNAL, source_name=c.platform,
+            confidence=0.7, agent_id="agent-1.3-external-researcher",
+            timestamp=datetime.now(),
+        ))
 
     # InternalResearcher
     _send_event(session_id, "agent_start", {

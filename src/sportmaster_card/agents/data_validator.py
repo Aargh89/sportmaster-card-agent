@@ -185,8 +185,9 @@ class DataValidatorAgent:
                 >>> report.is_valid, report.overall_completeness
                 (True, 0.375)
         """
-        if self._is_llm_mode():
-            return self._validate_with_llm(product)
+        # Rule-based agent — always use deterministic logic (no LLM needed)
+        # if self._is_llm_mode():
+        #     return self._validate_with_llm(product)
         return self._validate_stub(product)
 
     # ------------------------------------------------------------------

@@ -174,11 +174,9 @@ class DataEnricherAgent:
                 >>> profile.mcm_id == p.mcm_id
                 True
         """
-        if self._is_llm_mode():
-            return self._enrich_with_llm(
-                product, validation_report, competitor_benchmark,
-                provenance_entries, internal_insights, creative_insights,
-            )
+        # DataEnricher is always rule-based — it merges data from other agents.
+        # LLM is not needed for aggregation. The real intelligence is in
+        # DataCurator (which uses LLM to enrich the merged profile).
         return self._enrich_stub(
             product, validation_report, competitor_benchmark,
             provenance_entries, internal_insights, creative_insights,

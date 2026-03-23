@@ -128,8 +128,9 @@ class StructurePlannerAgent:
             ContentStructure with ordered sections and guidelines,
             ready for the Content Generator to produce section content.
         """
-        if self._is_llm_mode():
-            return self._plan_with_llm(brief)
+        # Rule-based agent — always use deterministic logic (no LLM needed)
+        # if self._is_llm_mode():
+        #     return self._plan_with_llm(brief)
         return self._plan_stub(brief)
 
     # ------------------------------------------------------------------

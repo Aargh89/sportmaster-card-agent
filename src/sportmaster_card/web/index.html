@@ -593,6 +593,8 @@ async function startPipeline() {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    let currentEvent = 'message';
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -603,14 +605,13 @@ async function startPipeline() {
 
       for (const line of lines) {
         if (line.startsWith('event:')) {
-          const eventType = line.slice(6).trim();
-          continue;
-        }
-        if (line.startsWith('data:')) {
+          currentEvent = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
           try {
-            const data = JSON.parse(line.slice(5).trim());
-            handleEvent(data);
-          } catch {}
+            const payload = JSON.parse(line.slice(5).trim());
+            handleEvent({ event: currentEvent, data: payload });
+          } catch(e) { console.warn('SSE parse error:', e, line); }
+          currentEvent = 'message';
         }
       }
     }
@@ -623,24 +624,11 @@ async function startPipeline() {
   btn.textContent = 'Запустить генерацию';
 }
 
-function handleEvent(rawData) {
-  // SSE-starlette wraps: we get the event from the SSE format
-  // The actual data comes in `data` field
-  let eventType, data;
+function handleEvent(sseEvent) {
+  const eventType = sseEvent.event || 'message';
+  const data = sseEvent.data || sseEvent;
 
-  if (typeof rawData === 'string') {
-    try { rawData = JSON.parse(rawData); } catch { return; }
-  }
-
-  // Handle SSE wrapper
-  if (rawData.event && rawData.data) {
-    eventType = rawData.event;
-    data = typeof rawData.data === 'string' ? JSON.parse(rawData.data) : rawData.data;
-  } else {
-    // Direct event data
-    eventType = rawData.event || rawData.type || 'unknown';
-    data = rawData;
-  }
+  console.log('SSE:', eventType, data);
 
   const stepsDiv = document.getElementById('agentSteps');
 

@@ -144,6 +144,7 @@ def wb_search(
     sort: str = "popular",
     page: int = 1,
     retry_delay: float = WB_REQUEST_DELAY,
+    max_versions: int = 4,
 ) -> list[WBProduct]:
     """Search Wildberries for products matching the query.
 
@@ -186,7 +187,7 @@ def wb_search(
         "spp": 30,
     }
 
-    for version in WB_SEARCH_VERSIONS:
+    for version in WB_SEARCH_VERSIONS[:max_versions]:
         url = WB_SEARCH_URL.format(version=version)
         try:
             response = requests.get(

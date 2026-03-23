@@ -113,8 +113,9 @@ class FactCheckerAgent:
             FactCheckReport with is_accurate verdict, inaccuracies
             list, and unverifiable_claims list.
         """
-        if self._is_llm_mode():
-            return self._check_with_llm(content, profile)
+        # Rule-based agent — always use deterministic logic (no LLM needed)
+        # if self._is_llm_mode():
+        #     return self._check_with_llm(content, profile)
         return self._check_stub(content, profile)
 
     # ------------------------------------------------------------------

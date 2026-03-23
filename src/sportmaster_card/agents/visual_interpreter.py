@@ -190,8 +190,9 @@ class VisualInterpreterAgent:
                 >>> prov == []
                 True
         """
-        if self._is_llm_mode():
-            return self._interpret_with_llm(product)
+        # Rule-based agent — always use deterministic logic (no LLM needed)
+        # if self._is_llm_mode():
+        #     return self._interpret_with_llm(product)
         return self._interpret_stub(product)
 
     # ------------------------------------------------------------------

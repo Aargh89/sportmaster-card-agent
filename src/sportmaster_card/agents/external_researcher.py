@@ -241,9 +241,10 @@ class ExternalResearcherAgent:
         except Exception as e:
             logger.warning("Ozon search failed: %s", e)
 
-        # If no real results from either, fall back to stub
+        # If no results from API, use LLM to research competitors
         if not all_competitors:
-            return self._research_stub(product)
+            logger.info("API search failed, falling back to LLM research")
+            return self._research_with_llm(product)
 
         # Build provenance and benchmark
         provenance = self._build_provenance(all_competitors)
@@ -336,65 +337,124 @@ class ExternalResearcherAgent:
     def _research_with_llm(
         self, product: ProductInput
     ) -> tuple[CompetitorBenchmark, list[DataProvenance]]:
-        """Research competitors using CrewAI Agent+Task with a real LLM.
+        """Research competitors using LLM knowledge when APIs are unavailable.
 
-        Loads the external_researcher.yaml prompt template, fills it with
-        product data, and delegates to a CrewAI Crew for execution.
-        Falls back to stub research if the LLM call fails.
+        Asks the LLM to provide competitor data from its training knowledge
+        about products on Russian marketplaces. This is a fallback when
+        direct API access to WB/Ozon is rate-limited or blocked.
 
-        Args:
-            product: ProductInput to research competitors for.
-
-        Returns:
-            Tuple of (CompetitorBenchmark, list[DataProvenance]) from LLM
-            output, or stub fallback on error.
+        Returns real-ish data based on LLM's knowledge of the market.
         """
+        import json as json_mod
         from crewai import Agent, Crew, Task
-
         from sportmaster_card.utils.llm_config import get_llm
+        from datetime import datetime
 
-        # Load prompt template from YAML config
-        prompt_path = (
-            Path(__file__).parent.parent / "config" / "prompts" / "external_researcher.yaml"
-        )
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            prompts = yaml.safe_load(f)
+        techs = ", ".join(product.technologies or [])
 
-        # Fill task template with product data
-        task_desc = prompts["task_template"].format(
-            mcm_id=product.mcm_id,
-            brand=product.brand,
-            category=product.category,
-            product_subgroup=product.product_subgroup,
-            product_name=product.product_name,
-            target_platforms="Wildberries, Ozon, Lamoda, Яндекс.Маркет",
-        )
+        task_desc = f"""Ты — аналитик маркетплейсов. Найди конкурентные товары для:
+
+Товар: {product.brand} {product.product_name}
+Категория: {product.category} → {product.product_subgroup}
+Технологии: {techs or 'не указаны'}
+
+Найди 5-8 конкурентных товаров с Wildberries и Ozon. Для каждого укажи:
+- Реальный бренд и название (как на маркетплейсе)
+- Примерную цену в рублях
+- Примерный рейтинг (4.0-5.0)
+- 2-3 ключевые особенности
+- Площадку (wb или ozon)
+
+Верни ТОЛЬКО JSON (без markdown, без ```):
+{{
+  "competitors": [
+    {{
+      "platform": "wb",
+      "brand": "Бренд",
+      "name": "Название товара",
+      "price": 29990,
+      "rating": 4.6,
+      "features": ["особенность 1", "особенность 2"],
+      "url": "https://www.wildberries.ru/catalog/000000/detail.aspx"
+    }}
+  ],
+  "avg_price": 25000,
+  "summary": "Краткий вывод о конкурентном окружении"
+}}"""
 
         agent = Agent(
-            role="External Researcher",
-            goal=prompts["system_prompt"],
-            backstory="Competitive intelligence analyst for Russian e-commerce",
-            llm=get_llm("gemini_flash"),
+            role="Marketplace Analyst",
+            goal="Найти реальные конкурентные товары на российских маркетплейсах",
+            backstory="Эксперт по ценообразованию и ассортименту WB и Ozon с 5-летним опытом",
+            llm=get_llm("gpt4o"),
             verbose=False,
         )
 
         task = Task(
             description=task_desc,
             agent=agent,
-            expected_output=prompts["expected_output"],
+            expected_output="JSON с массивом competitors",
         )
 
         crew = Crew(agents=[agent], tasks=[task], verbose=False)
 
         try:
-            crew.kickoff()
-        except Exception:
-            # LLM call failed -- fall back to stub
-            return self._research_stub(product)
+            result = crew.kickoff()
+            raw = result.raw if hasattr(result, "raw") else str(result)
 
-        # LLM output is advisory; use stub for structured return
-        # to ensure type safety and consistent provenance tracking.
-        return self._research_stub(product)
+            # Strip code fences
+            raw_clean = raw.strip()
+            if raw_clean.startswith("```"):
+                raw_clean = raw_clean.split("\n", 1)[1] if "\n" in raw_clean else raw_clean[3:]
+                if raw_clean.endswith("```"):
+                    raw_clean = raw_clean[:-3]
+                raw_clean = raw_clean.strip()
+
+            parsed = json_mod.loads(raw_clean)
+
+            competitors = []
+            for c in parsed.get("competitors", []):
+                card = CompetitorCard(
+                    platform=c.get("platform", "wb"),
+                    product_name=f"{c.get('brand', '')} {c.get('name', '')}".strip(),
+                    description=", ".join(c.get("features", [])),
+                    price=float(c.get("price", 0)) if c.get("price") else None,
+                    rating=float(c.get("rating", 0)),
+                    key_features=c.get("features", []),
+                    url=c.get("url", ""),
+                )
+                competitors.append(card)
+
+            provenance = [
+                DataProvenance(
+                    attribute_name="competitor_card",
+                    value=c.product_name,
+                    source_type=SourceType.EXTERNAL,
+                    source_name=f"LLM knowledge ({c.platform})",
+                    confidence=0.5,  # Lower confidence — from LLM, not real API
+                    agent_id=_AGENT_ID,
+                    timestamp=datetime.now(),
+                )
+                for c in competitors
+            ]
+
+            prices = [c.price for c in competitors if c.price]
+            avg_price = parsed.get("avg_price") or (sum(prices) / len(prices) if prices else None)
+
+            benchmark = CompetitorBenchmark(
+                mcm_id=product.mcm_id,
+                competitors=competitors,
+                benchmark_summary=parsed.get("summary", f"LLM: найдено {len(competitors)} конкурентов"),
+                average_price=avg_price,
+                common_features=[],
+            )
+
+            return benchmark, provenance
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("LLM research failed: %s", e)
+            return self._research_stub(product)
 
     def _get_stub_competitors(self, product: ProductInput) -> list[CompetitorCard]:
         """Return stub competitor data for Phase 1 testing.

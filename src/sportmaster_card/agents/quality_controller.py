@@ -120,8 +120,9 @@ class QualityControllerAgent:
             QualityScore with overall and per-dimension scores,
             plus an issues list for feedback on failing dimensions.
         """
-        if self._is_llm_mode():
-            return self._evaluate_with_llm(content, compliance, fact_check)
+        # Rule-based agent — always use deterministic logic (no LLM needed)
+        # if self._is_llm_mode():
+        #     return self._evaluate_with_llm(content, compliance, fact_check)
         return self._evaluate_stub(content, compliance, fact_check)
 
     # ------------------------------------------------------------------

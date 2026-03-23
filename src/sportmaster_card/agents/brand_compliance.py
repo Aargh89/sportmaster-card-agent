@@ -108,8 +108,9 @@ class BrandComplianceAgent:
             ComplianceReport with is_compliant verdict, violations
             list, and suggested fixes for each violation.
         """
-        if self._is_llm_mode():
-            return self._check_with_llm(content, brand_name, forbidden_words)
+        # Rule-based agent — always use deterministic logic (no LLM needed)
+        # if self._is_llm_mode():
+        #     return self._check_with_llm(content, brand_name, forbidden_words)
         return self._check_stub(content, brand_name, forbidden_words)
 
     # ------------------------------------------------------------------
