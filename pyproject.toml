@@ -1,0 +1,60 @@
+[project]
+name = "sportmaster-card-agent"
+version = "0.1.0"
+description = "Multi-agent system for Sportmaster product card lifecycle management"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Sportmaster AI Team"},
+]
+
+dependencies = [
+    "crewai>=1.5.0",
+    "crewai-tools>=0.40.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+    "ruff>=0.4",
+]
+rag = [
+    "chromadb>=1.0",
+    "qdrant-client>=1.9",
+]
+scraping = [
+    "crawl4ai>=0.3",
+    "beautifulsoup4>=4.12",
+    "playwright>=1.44",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
