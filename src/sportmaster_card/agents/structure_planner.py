@@ -46,6 +46,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+import yaml
+
 from sportmaster_card.models.content import ContentBrief, ContentStructure
 
 
@@ -111,6 +116,10 @@ class StructurePlannerAgent:
         Takes the brief's required_sections, orders them by reading
         flow priority, and attaches per-section writing guidelines.
 
+        Uses real LLM (via CrewAI + OpenRouter) when OPENROUTER_API_KEY
+        is set in the environment. Falls back to deterministic section
+        planning otherwise.
+
         Args:
             brief: ContentBrief specifying required sections, platform,
                 and content constraints from the Brief Selector agent.
@@ -118,6 +127,29 @@ class StructurePlannerAgent:
         Returns:
             ContentStructure with ordered sections and guidelines,
             ready for the Content Generator to produce section content.
+        """
+        if self._is_llm_mode():
+            return self._plan_with_llm(brief)
+        return self._plan_stub(brief)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub planning (Phase 1 deterministic, no LLM)
+    # ------------------------------------------------------------------
+
+    def _plan_stub(self, brief: ContentBrief) -> ContentStructure:
+        """Plan using deterministic section ordering (no LLM).
+
+        This is the original Phase 1 planning logic, preserved for use
+        when no API key is available or for testing.
         """
         # Step 1: Order sections by priority (natural reading flow)
         ordered = self._order_sections(brief.required_sections)
@@ -131,6 +163,81 @@ class StructurePlannerAgent:
             sections=ordered,
             section_guidelines=guidelines,
         )
+
+    # ------------------------------------------------------------------
+    # LLM planning (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _plan_with_llm(self, brief: ContentBrief) -> ContentStructure:
+        """Plan using CrewAI Agent+Task with a real LLM.
+
+        Loads the structure_planner.yaml prompt template, fills it with
+        brief data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub planning if the LLM call fails or returns
+        unparseable output.
+
+        Args:
+            brief: ContentBrief with required sections and constraints.
+
+        Returns:
+            ContentStructure from LLM output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "structure_planner.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Fill task template with brief data
+        task_desc = prompts["task_template"].format(
+            mcm_id=brief.mcm_id,
+            brand="",
+            category="",
+            product_subgroup="",
+            platform_id=brief.platform_id,
+            tone_of_voice=brief.tone_of_voice,
+            technologies="",
+            key_features="",
+            composition="",
+            benefits_data="",
+            seo_keywords="",
+            max_description_length=brief.max_description_length,
+            required_sections=", ".join(brief.required_sections),
+            html_support="true",
+        )
+
+        agent = Agent(
+            role="Structure Planner",
+            goal=prompts["system_prompt"],
+            backstory="Information architecture specialist for Sportmaster product cards",
+            llm=get_llm("claude_haiku"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+            output_pydantic=ContentStructure,
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            result = crew.kickoff()
+        except Exception:
+            return self._plan_stub(brief)
+
+        if hasattr(result, "pydantic") and result.pydantic:
+            return result.pydantic
+
+        # Fallback: could not parse LLM output into ContentStructure
+        return self._plan_stub(brief)
 
     # ------------------------------------------------------------------
     # Private helpers -- deterministic section planning (Phase 1)
