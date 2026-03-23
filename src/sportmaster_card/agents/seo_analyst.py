@@ -42,6 +42,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+import yaml
+
 from sportmaster_card.models.content import SEOProfile
 from sportmaster_card.models.product_input import ProductInput
 
@@ -85,6 +90,10 @@ class SEOAnalystAgent:
         meta-description recommendations, and returns a complete
         SEOProfile for the target platform.
 
+        Uses real LLM (via CrewAI + OpenRouter) when OPENROUTER_API_KEY
+        is set in the environment. Falls back to deterministic keyword
+        extraction otherwise.
+
         Args:
             product: Product data containing brand, category, product
                 group, subgroup, name, and optionally technologies.
@@ -94,6 +103,33 @@ class SEOAnalystAgent:
         Returns:
             SEOProfile with primary/secondary keywords and meta-tag
             recommendations for the specified platform.
+        """
+        if self._is_llm_mode():
+            return self._analyze_with_llm(product, platform_id)
+        return self._analyze_stub(product, platform_id)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub analysis (Phase 1 deterministic, no LLM)
+    # ------------------------------------------------------------------
+
+    def _analyze_stub(
+        self,
+        product: ProductInput,
+        platform_id: str,
+    ) -> SEOProfile:
+        """Analyze using deterministic keyword extraction (no LLM).
+
+        This is the original Phase 1 analysis logic, preserved for use
+        when no API key is available or for testing.
         """
         # Step 1: Extract high-priority keywords (brand + product type combos)
         primary = self._extract_primary_keywords(product)
@@ -113,6 +149,84 @@ class SEOAnalystAgent:
             title_recommendation=title,
             meta_description_recommendation=meta,
         )
+
+    # ------------------------------------------------------------------
+    # LLM analysis (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _analyze_with_llm(
+        self,
+        product: ProductInput,
+        platform_id: str,
+    ) -> SEOProfile:
+        """Analyze using CrewAI Agent+Task with a real LLM.
+
+        Loads the seo_analyst.yaml prompt template, fills it with
+        product data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub analysis if the LLM call fails or returns
+        unparseable output.
+
+        Args:
+            product: Product data for SEO analysis.
+            platform_id: Target platform identifier.
+
+        Returns:
+            SEOProfile from LLM output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "seo_analyst.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Fill task template with product data
+        task_desc = prompts["task_template"].format(
+            platform_id=platform_id,
+            mcm_id=product.mcm_id,
+            brand=product.brand,
+            category=product.category,
+            product_subgroup=product.product_subgroup,
+            product_name=product.product_name,
+            technologies=", ".join(product.technologies or []),
+            key_features=", ".join(product.technologies or []),
+            competitor_keywords="",
+            category_popular_queries="",
+            max_title_length=150,
+            platform_seo_notes="",
+        )
+
+        agent = Agent(
+            role="SEO Analyst",
+            goal=prompts["system_prompt"],
+            backstory="SEO specialist for Sportmaster marketplaces",
+            llm=get_llm("gemini_flash"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+            output_pydantic=SEOProfile,
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            result = crew.kickoff()
+        except Exception:
+            return self._analyze_stub(product, platform_id)
+
+        if hasattr(result, "pydantic") and result.pydantic:
+            return result.pydantic
+
+        # Fallback: could not parse LLM output into SEOProfile
+        return self._analyze_stub(product, platform_id)
 
     # ------------------------------------------------------------------
     # Private helpers -- deterministic keyword extraction (Phase 1)
