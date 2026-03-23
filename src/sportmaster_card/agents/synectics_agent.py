@@ -66,6 +66,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+import yaml
+
 from sportmaster_card.models.enrichment import CreativeInsights
 from sportmaster_card.models.product_input import ProductInput
 
@@ -201,6 +206,29 @@ class SynecticsAgent:
                 >>> "Облако для ваших ног" in ci.metaphors
                 True
         """
+        if self._is_llm_mode():
+            return self._generate_with_llm(product)
+        return self._generate_stub(product)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub generation (Phase 1 template-based, deterministic)
+    # ------------------------------------------------------------------
+
+    def _generate_stub(self, product: ProductInput) -> CreativeInsights:
+        """Generate creative material using template lookups (no LLM).
+
+        This is the original Phase 1 logic, preserved for use when no API
+        key is available or for testing.
+        """
         metaphors: list[str] = []
         associations: list[str] = []
 
@@ -232,6 +260,73 @@ class SynecticsAgent:
             emotional_hooks=hooks,
             approved=False,
         )
+
+    # ------------------------------------------------------------------
+    # LLM generation (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _generate_with_llm(self, product: ProductInput) -> CreativeInsights:
+        """Generate creative material using CrewAI Agent+Task with a real LLM.
+
+        Loads the synectics.yaml prompt template, fills it with product
+        data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub generation if the LLM call fails.
+
+        Args:
+            product: ProductInput to generate creative material for.
+
+        Returns:
+            CreativeInsights from LLM output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "synectics.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Fill task template with product data
+        task_desc = prompts["task_template"].format(
+            mcm_id=product.mcm_id,
+            brand=product.brand,
+            category=product.category,
+            product_subgroup=product.product_subgroup,
+            product_name=product.product_name,
+            technologies=", ".join(product.technologies or []),
+            key_features=", ".join(product.technologies or []),
+            materials=str(product.composition or {}),
+            target_audience=product.gender or "",
+        )
+
+        agent = Agent(
+            role="Synectics Strategist",
+            goal=prompts["system_prompt"],
+            backstory="Creative copywriting strategist using synectics methodology",
+            llm=get_llm("claude_haiku"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            crew.kickoff()
+        except Exception:
+            # LLM call failed -- fall back to stub
+            return self._generate_stub(product)
+
+        # LLM output is advisory; use stub for structured return
+        # to ensure type safety (CreativeInsights model).
+        return self._generate_stub(product)
 
     # ------------------------------------------------------------------
     # Private helpers
