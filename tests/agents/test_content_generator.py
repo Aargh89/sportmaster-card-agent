@@ -116,3 +116,14 @@ def test_generated_description_within_length_limit():
     result = agent.generate(product, max_description_length=limit)
 
     assert len(result.description) <= limit
+
+
+def test_content_generator_uses_stub_without_api_key(monkeypatch):
+    """Without API key, generate() uses stub mode."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    gen = ContentGeneratorAgent()
+    product = _sample_product()
+    result = gen.generate(product)
+    # Stub mode should work exactly as before
+    assert result.product_name != ""
+    assert result.platform_id == "sm_site"

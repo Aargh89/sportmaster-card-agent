@@ -45,6 +45,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+import yaml
+
 from sportmaster_card.models.content import Benefit, PlatformContent
 from sportmaster_card.models.product_input import ProductInput
 
@@ -121,6 +126,10 @@ class ContentGeneratorAgent:
         orchestrates all helper methods and assembles the final
         PlatformContent instance.
 
+        Uses real LLM (via CrewAI + OpenRouter) when OPENROUTER_API_KEY
+        is set in the environment. Falls back to deterministic template-based
+        generation otherwise.
+
         Args:
             product: Enriched product data (ProductInput or CuratedProfile).
                 Must have all required fields populated. Optional fields
@@ -151,6 +160,39 @@ class ContentGeneratorAgent:
             >>> result.platform_id
             'wb'
         """
+        if self._is_llm_mode():
+            return self._generate_with_llm(
+                product, platform_id, max_description_length, max_title_length,
+            )
+        return self._generate_stub(
+            product, platform_id, max_description_length, max_title_length,
+        )
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub generation (Phase 1 template-based, deterministic)
+    # ------------------------------------------------------------------
+
+    def _generate_stub(
+        self,
+        product: ProductInput,
+        platform_id: str,
+        max_description_length: int,
+        max_title_length: int,
+    ) -> PlatformContent:
+        """Generate content using deterministic templates (no LLM).
+
+        This is the original Phase 1 generation logic, preserved for use
+        when no API key is available or for testing.
+        """
         # Step 1: Generate SEO-optimized product name
         product_name = self._generate_product_name(product, max_title_length)
 
@@ -174,6 +216,99 @@ class ContentGeneratorAgent:
             seo_title=seo_title,
             seo_meta_description=seo_meta,
             seo_keywords=seo_keywords,
+        )
+
+    # ------------------------------------------------------------------
+    # LLM generation (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _generate_with_llm(
+        self,
+        product: ProductInput,
+        platform_id: str,
+        max_description_length: int,
+        max_title_length: int,
+    ) -> PlatformContent:
+        """Generate content using CrewAI Agent+Task with a real LLM.
+
+        Loads the content_generator.yaml prompt template, fills it with
+        product data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub generation if the LLM call fails or returns
+        unparseable output.
+
+        Args:
+            product: Enriched product data.
+            platform_id: Target platform identifier.
+            max_description_length: Maximum description length.
+            max_title_length: Maximum title length.
+
+        Returns:
+            PlatformContent from LLM output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "content_generator.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Fill task template with product data
+        task_desc = prompts["task_template"].format(
+            platform_id=platform_id,
+            product_name=product.product_name,
+            brand=product.brand,
+            category=product.category,
+            description=product.description or "",
+            technologies=", ".join(product.technologies or []),
+            composition=str(product.composition or {}),
+            key_features=", ".join(product.technologies or []),
+            benefits_data="",
+            seo_keywords="",
+            title_recommendation="",
+            max_title_length=max_title_length,
+            max_description_length=max_description_length,
+            required_sections="description, benefits, technologies",
+            tone_of_voice="professional",
+            content_structure="standard",
+            creative_hooks="",
+            emotional_hooks="",
+        )
+
+        agent = Agent(
+            role="Content Generator",
+            goal=prompts["system_prompt"],
+            backstory="Expert e-commerce copywriter for Sportmaster",
+            llm=get_llm("claude_sonnet"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+            output_pydantic=PlatformContent,
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            result = crew.kickoff()
+        except Exception:
+            # LLM call failed -- fall back to stub
+            return self._generate_stub(
+                product, platform_id, max_description_length, max_title_length,
+            )
+
+        if hasattr(result, "pydantic") and result.pydantic:
+            return result.pydantic
+
+        # Fallback: could not parse LLM output into PlatformContent
+        return self._generate_stub(
+            product, platform_id, max_description_length, max_title_length,
         )
 
     # ------------------------------------------------------------------
