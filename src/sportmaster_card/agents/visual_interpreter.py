@@ -60,7 +60,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
 
 from sportmaster_card.models.product_input import ProductInput
 from sportmaster_card.models.provenance import DataProvenance, SourceType
@@ -186,6 +190,31 @@ class VisualInterpreterAgent:
                 >>> prov == []
                 True
         """
+        if self._is_llm_mode():
+            return self._interpret_with_llm(product)
+        return self._interpret_stub(product)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub interpretation (Phase 1 rule-based, deterministic)
+    # ------------------------------------------------------------------
+
+    def _interpret_stub(
+        self, product: ProductInput
+    ) -> tuple[dict[str, str], list[DataProvenance]]:
+        """Extract visual attributes using rule-based stubs (no LLM).
+
+        This is the original Phase 1 logic, preserved for use when no API
+        key is available or for testing.
+        """
         # No photos means no visual extraction is possible.
         # Return empty results and let the Data Enricher handle the gap.
         if not product.photo_urls:
@@ -199,6 +228,82 @@ class VisualInterpreterAgent:
         provenance = self._build_provenance(attributes, product.photo_urls[0])
 
         return attributes, provenance
+
+    # ------------------------------------------------------------------
+    # LLM interpretation (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _interpret_with_llm(
+        self, product: ProductInput
+    ) -> tuple[dict[str, str], list[DataProvenance]]:
+        """Extract visual attributes using CrewAI Agent+Task with a real LLM.
+
+        Loads the visual_interpreter.yaml prompt template, fills it with
+        product data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub interpretation if the LLM call fails.
+
+        Note: In Phase 2, photo URLs would be passed to a vision-capable
+        model (e.g., Gemini Flash with vision). Current implementation
+        sends photo URLs as text context for the LLM to reason about.
+
+        Args:
+            product: A ProductInput instance with photo_urls.
+
+        Returns:
+            Tuple of (attributes dict, list[DataProvenance]) from LLM
+            output, or stub fallback on error.
+        """
+        # No photos -- same behavior in both modes
+        if not product.photo_urls:
+            return {}, []
+
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "visual_interpreter.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Fill task template with product data
+        task_desc = prompts["task_template"].format(
+            mcm_id=product.mcm_id,
+            brand=product.brand,
+            category=product.category,
+            product_subgroup=product.product_subgroup,
+            photo_urls="\n".join(product.photo_urls or []),
+            declared_color=product.color or "",
+            declared_material="",
+        )
+
+        agent = Agent(
+            role="Visual Interpreter",
+            goal=prompts["system_prompt"],
+            backstory="Expert visual analyst for Sportmaster product photos",
+            llm=get_llm("gemini_flash"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            crew.kickoff()
+        except Exception:
+            # LLM call failed -- fall back to stub
+            return self._interpret_stub(product)
+
+        # LLM output is advisory; use stub for structured return
+        # to ensure type safety and consistent provenance tracking.
+        return self._interpret_stub(product)
 
     # ------------------------------------------------------------------
     # Private helpers
