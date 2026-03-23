@@ -51,6 +51,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+import yaml
+
 from sportmaster_card.models.content import PlatformContent
 
 
@@ -83,6 +88,10 @@ class CopyEditorAgent:
         Returns a new PlatformContent with edits applied -- the original
         instance is not modified (immutable Pydantic model).
 
+        Uses real LLM (via CrewAI + OpenRouter) when OPENROUTER_API_KEY
+        is set in the environment. Falls back to deterministic mechanical
+        editing otherwise.
+
         Args:
             content: The raw PlatformContent to edit and polish.
             max_description_length: Maximum character count for the description
@@ -94,6 +103,36 @@ class CopyEditorAgent:
             A new PlatformContent instance with enforced limits and cleaned
             whitespace. All other fields (benefits, seo_keywords, hashes)
             are passed through unchanged.
+        """
+        if self._is_llm_mode():
+            return self._edit_with_llm(
+                content, max_description_length, max_title_length,
+            )
+        return self._edit_stub(content, max_description_length, max_title_length)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub editing (Phase 1 mechanical, no LLM)
+    # ------------------------------------------------------------------
+
+    def _edit_stub(
+        self,
+        content: PlatformContent,
+        max_description_length: int,
+        max_title_length: int,
+    ) -> PlatformContent:
+        """Edit using deterministic mechanical rules (no LLM).
+
+        This is the original Phase 1 editing logic, preserved for use
+        when no API key is available or for testing.
         """
         return PlatformContent(
             mcm_id=content.mcm_id,
@@ -113,6 +152,88 @@ class CopyEditorAgent:
             content_hash=content.content_hash,
             source_curated_profile_hash=content.source_curated_profile_hash,
         )
+
+    # ------------------------------------------------------------------
+    # LLM editing (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _edit_with_llm(
+        self,
+        content: PlatformContent,
+        max_description_length: int,
+        max_title_length: int,
+    ) -> PlatformContent:
+        """Edit using CrewAI Agent+Task with a real LLM.
+
+        Loads the copy_editor.yaml prompt template, fills it with
+        content data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub editing if the LLM call fails or returns
+        unparseable output.
+
+        Args:
+            content: The raw PlatformContent to edit.
+            max_description_length: Maximum description length.
+            max_title_length: Maximum title length.
+
+        Returns:
+            PlatformContent from LLM output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "copy_editor.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Format benefits for the prompt
+        benefits_text = "; ".join(
+            f"{b.title}: {b.description}" for b in content.benefits
+        )
+
+        # Fill task template with content data
+        task_desc = prompts["task_template"].format(
+            platform_id=content.platform_id,
+            product_name=content.product_name,
+            description=content.description,
+            benefits=benefits_text,
+            seo_title=content.seo_title,
+            seo_meta_description=content.seo_meta_description,
+            max_title_length=max_title_length,
+            max_description_length=max_description_length,
+            seo_keywords=", ".join(content.seo_keywords),
+        )
+
+        agent = Agent(
+            role="Copy Editor",
+            goal=prompts["system_prompt"],
+            backstory="Professional Russian-language copy editor for Sportmaster",
+            llm=get_llm("claude_haiku"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+            output_pydantic=PlatformContent,
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            result = crew.kickoff()
+        except Exception:
+            return self._edit_stub(content, max_description_length, max_title_length)
+
+        if hasattr(result, "pydantic") and result.pydantic:
+            return result.pydantic
+
+        # Fallback: could not parse LLM output into PlatformContent
+        return self._edit_stub(content, max_description_length, max_title_length)
 
     def _enforce_limit(self, text: str, max_length: int) -> str:
         """Truncate text to max_length, cutting at last word boundary.
