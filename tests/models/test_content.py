@@ -156,3 +156,79 @@ def test_quality_score_passes_threshold():
     # Zero score
     zero = QualityScore(overall_score=0.0, **base)
     assert zero.passes_threshold is False
+
+
+# ---------------------------------------------------------------------------
+# UC2 quality models: SEOProfile, ContentStructure, ComplianceReport, FactCheckReport
+# ---------------------------------------------------------------------------
+
+
+def test_seo_profile_valid():
+    """SEOProfile captures keyword recommendations for a product on a platform."""
+    from sportmaster_card.models.content import SEOProfile
+
+    seo = SEOProfile(
+        mcm_id="MCM-001",
+        platform_id="sm_site",
+        primary_keywords=["беговые кроссовки nike", "nike pegasus"],
+        secondary_keywords=["кроссовки для бега", "air zoom"],
+        title_recommendation="Nike Беговые кроссовки Pegasus 41",
+        meta_description_recommendation="Купить Nike Pegasus 41 в Спортмастер",
+    )
+    assert len(seo.primary_keywords) == 2
+
+
+def test_content_structure_valid():
+    """ContentStructure defines section layout and guidelines for content generation."""
+    from sportmaster_card.models.content import ContentStructure
+
+    cs = ContentStructure(
+        mcm_id="MCM-001",
+        platform_id="sm_site",
+        sections=["intro", "benefits", "technologies", "composition"],
+        section_guidelines={"intro": "2-3 предложения, ключевые преимущества"},
+        target_word_count=500,
+    )
+    assert len(cs.sections) == 4
+
+
+def test_compliance_report_valid():
+    """ComplianceReport defaults to empty violations when compliant."""
+    from sportmaster_card.models.content import ComplianceReport
+
+    cr = ComplianceReport(mcm_id="MCM-001", is_compliant=True)
+    assert cr.violations == []
+
+
+def test_compliance_report_with_violations():
+    """ComplianceReport captures brand guideline violations and suggestions."""
+    from sportmaster_card.models.content import ComplianceReport
+
+    cr = ComplianceReport(
+        mcm_id="MCM-001",
+        is_compliant=False,
+        violations=["Название бренда в нижнем регистре"],
+        suggestions=["Использовать 'Nike' вместо 'nike'"],
+    )
+    assert not cr.is_compliant
+
+
+def test_fact_check_report_valid():
+    """FactCheckReport defaults to empty inaccuracies when accurate."""
+    from sportmaster_card.models.content import FactCheckReport
+
+    fcr = FactCheckReport(mcm_id="MCM-001", is_accurate=True)
+    assert fcr.inaccuracies == []
+
+
+def test_fact_check_report_with_issues():
+    """FactCheckReport captures inaccuracies and unverifiable claims."""
+    from sportmaster_card.models.content import FactCheckReport
+
+    fcr = FactCheckReport(
+        mcm_id="MCM-001",
+        is_accurate=False,
+        inaccuracies=["Указан материал 'кожа', в CuratedProfile — 'текстиль'"],
+        unverifiable_claims=["'самая лёгкая модель' — нет данных для сравнения"],
+    )
+    assert len(fcr.inaccuracies) == 1

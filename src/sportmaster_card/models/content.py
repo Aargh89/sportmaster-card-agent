@@ -748,3 +748,515 @@ class QualityScore(BaseModel):
         # The 0.7 threshold is defined in the v0.3 architecture specification.
         # It represents the minimum acceptable quality for customer-facing content.
         return self.overall_score >= 0.7
+
+
+# ======================================================================
+# UC2 Quality & SEO models
+# ======================================================================
+#
+# The four models below support the quality-assurance side of the UC2
+# pipeline.  While the models above (ContentBrief, PlatformContent,
+# QualityScore) cover the *generation* path, the models here cover the
+# *evaluation* path:
+#
+#   SEOProfile          -- keyword & meta-tag recommendations per platform
+#   ContentStructure    -- section layout and word-count guidelines
+#   ComplianceReport    -- brand-guideline compliance check results
+#   FactCheckReport     -- factual accuracy verification results
+#
+# Together they feed into the Quality Controller (Agent 2.9) and provide
+# structured, actionable feedback to the Content Generator (Agent 2.7)
+# when content fails the quality gate.
+
+
+class SEOProfile(BaseModel):
+    """SEO keyword and meta-tag recommendations for a product on a platform.
+
+    SEOProfile is produced by the SEO Analyst sub-step of the Quality
+    Controller (Agent 2.9).  It captures the primary and secondary
+    keywords that the Content Generator should target, plus recommended
+    title and meta-description text optimized for search engines.
+
+    The profile is platform-specific because keyword strategies differ
+    across marketplaces (e.g., Wildberries favours long-tail queries
+    while the SM website targets branded terms).
+
+    Data Flow::
+
+        CuratedProfile + PlatformProfile
+            |
+            v
+        SEO Analyst (Agent 2.9 sub-step)
+            |
+            v
+        SEOProfile ---> Content Generator (keyword targets)
+                   +--> Quality Controller  (keyword coverage check)
+
+    Attributes:
+        mcm_id: MCM identifier linking this SEO profile to the product.
+            Correlation ID used across all pipeline agents for traceability.
+        platform_id: Target platform for these SEO recommendations.
+            Keyword strategy is platform-specific (SM site vs WB vs Ozon).
+        primary_keywords: High-priority keywords that MUST appear in the
+            generated content.  Typically 2-5 phrases combining brand name,
+            product type, and model.  Ordered by search volume descending.
+        secondary_keywords: Supporting keywords to improve topical coverage.
+            These SHOULD appear in the content when space allows but are not
+            mandatory.  Ordered by relevance descending.
+        title_recommendation: Suggested product title optimized for search.
+            Includes primary keyword, brand name, and key product attributes.
+            Must fit within the platform's max_title_length constraint.
+        meta_description_recommendation: Suggested HTML meta description
+            optimized for search result click-through rate (CTR).  Should
+            be 150-160 characters and include a call-to-action.
+
+    Examples:
+        SEO profile for Nike running shoes on SM site::
+
+            >>> seo = SEOProfile(
+            ...     mcm_id="MCM-001",
+            ...     platform_id="sm_site",
+            ...     primary_keywords=["беговые кроссовки nike"],
+            ...     secondary_keywords=["кроссовки для бега"],
+            ...     title_recommendation="Nike Pegasus 41",
+            ...     meta_description_recommendation="Купить Nike Pegasus 41",
+            ... )
+            >>> seo.primary_keywords[0]
+            'беговые кроссовки nike'
+    """
+
+    # ------------------------------------------------------------------
+    # Identity fields -- link SEO profile to product and platform
+    # ------------------------------------------------------------------
+
+    # MCM identifier: the universal correlation key tying this SEO profile
+    # back to the ProductInput and forward to PlatformContent / QualityScore.
+    mcm_id: str = Field(
+        ...,
+        description=(
+            "MCM identifier linking this SEO profile to the product. "
+            "Correlation ID used across all pipeline agents."
+        ),
+        examples=["MCM-001", "MCM-003-RED-38"],
+    )
+
+    # Platform identifier: SEO strategies differ per marketplace.
+    # WB favours long-tail queries; SM site targets branded search terms.
+    platform_id: str = Field(
+        ...,
+        description=(
+            "Target platform for these SEO recommendations. "
+            "Keyword strategy differs across marketplaces."
+        ),
+        examples=["sm_site", "wb", "ozon", "lamoda"],
+    )
+
+    # ------------------------------------------------------------------
+    # Keyword fields -- search terms the content should target
+    # ------------------------------------------------------------------
+
+    # Primary keywords: MUST appear in the generated content.
+    # Ordered by estimated search volume (highest first).
+    primary_keywords: list[str] = Field(
+        ...,
+        description=(
+            "High-priority keywords that MUST appear in content. "
+            "Typically 2-5 phrases: brand + product type + model. "
+            "Ordered by search volume descending."
+        ),
+        examples=[["беговые кроссовки nike", "nike pegasus"]],
+    )
+
+    # Secondary keywords: SHOULD appear when space allows.
+    # Improve topical coverage without being mandatory.
+    secondary_keywords: list[str] = Field(
+        default=[],
+        description=(
+            "Supporting keywords to improve topical coverage. "
+            "Should appear when space allows, not mandatory. "
+            "Ordered by relevance descending."
+        ),
+        examples=[["кроссовки для бега", "air zoom"]],
+    )
+
+    # ------------------------------------------------------------------
+    # Recommendation fields -- suggested meta-tag text
+    # ------------------------------------------------------------------
+
+    # Suggested product title with primary keyword placement.
+    # Must respect platform max_title_length from PlatformProfile.
+    title_recommendation: str = Field(
+        ...,
+        description=(
+            "Suggested product title optimized for search engines. "
+            "Includes primary keyword, brand, and key attributes. "
+            "Must fit within the platform's max_title_length."
+        ),
+        examples=["Nike Беговые кроссовки Pegasus 41"],
+    )
+
+    # Suggested meta description for search result snippets.
+    # Optimal length: 150-160 characters with a call-to-action.
+    meta_description_recommendation: str = Field(
+        ...,
+        description=(
+            "Suggested HTML meta description for search snippets. "
+            "Optimal length: 150-160 chars with call-to-action. "
+            "Improves click-through rate in search results."
+        ),
+        examples=["Купить Nike Pegasus 41 в Спортмастер — бесплатная доставка."],
+    )
+
+
+class ContentStructure(BaseModel):
+    """Section layout and word-count guidelines for content generation.
+
+    ContentStructure is produced by the Brief Selector (Agent 2.3) as a
+    companion to ContentBrief.  While ContentBrief specifies WHAT to write
+    and the tone, ContentStructure specifies HOW the content should be
+    organized: which sections, in what order, and with what guidelines.
+
+    The Content Generator uses ContentStructure to produce consistently
+    formatted product cards across thousands of SKUs, ensuring that every
+    card follows the same logical flow (e.g., intro -> benefits ->
+    technologies -> composition).
+
+    Data Flow::
+
+        PlatformProfile.content_template
+            |
+            v
+        Brief Selector (Agent 2.3)
+            |
+            v
+        ContentStructure ---> Content Generator (section layout)
+
+    Attributes:
+        mcm_id: MCM identifier linking this structure to the product.
+            Correlation ID used across all pipeline agents.
+        platform_id: Target platform for this content structure.
+            Different platforms may require different section layouts
+            (e.g., Ozon requires a "characteristics" section).
+        sections: Ordered list of section identifiers that define the
+            content layout.  The Content Generator produces text for each
+            section in this exact order.  Common sections: "intro",
+            "benefits", "technologies", "composition", "care".
+        section_guidelines: Per-section writing guidelines as a mapping
+            from section identifier to instruction text.  Not every
+            section needs a guideline; missing keys use defaults.
+        target_word_count: Target total word count for all sections
+            combined.  Used by the Quality Controller to flag content
+            that is too short or too long.
+
+    Examples:
+        Structure for a running shoe on SM site::
+
+            >>> cs = ContentStructure(
+            ...     mcm_id="MCM-001",
+            ...     platform_id="sm_site",
+            ...     sections=["intro", "benefits"],
+            ...     section_guidelines={"intro": "2-3 sentences"},
+            ...     target_word_count=400,
+            ... )
+            >>> cs.sections[0]
+            'intro'
+    """
+
+    # ------------------------------------------------------------------
+    # Identity fields
+    # ------------------------------------------------------------------
+
+    # MCM identifier: correlates this structure with the product.
+    mcm_id: str = Field(
+        ...,
+        description=(
+            "MCM identifier linking this content structure to the product. "
+            "Correlation ID used across all pipeline agents."
+        ),
+        examples=["MCM-001", "MCM-003-RED-38"],
+    )
+
+    # Platform identifier: section layouts differ per marketplace.
+    # Ozon may require "characteristics"; WB may skip "technologies".
+    platform_id: str = Field(
+        ...,
+        description=(
+            "Target platform for this content structure. "
+            "Different platforms require different section layouts."
+        ),
+        examples=["sm_site", "wb", "ozon"],
+    )
+
+    # ------------------------------------------------------------------
+    # Structure fields -- section layout and guidelines
+    # ------------------------------------------------------------------
+
+    # Ordered section identifiers defining the content layout.
+    # Content Generator produces text for each section in this order.
+    sections: list[str] = Field(
+        ...,
+        description=(
+            "Ordered list of section identifiers defining content layout. "
+            "Content Generator produces text for each section in order. "
+            "Common: 'intro', 'benefits', 'technologies', 'composition'."
+        ),
+        examples=[["intro", "benefits", "technologies", "composition"]],
+    )
+
+    # Per-section writing instructions (section_id -> guideline text).
+    # Not all sections need guidelines; missing keys use platform defaults.
+    section_guidelines: dict[str, str] = Field(
+        default={},
+        description=(
+            "Per-section writing guidelines mapping section identifier "
+            "to instruction text. Missing keys use platform defaults."
+        ),
+        examples=[{"intro": "2-3 предложения, ключевые преимущества"}],
+    )
+
+    # Target total word count across all sections combined.
+    # Quality Controller flags content that deviates significantly.
+    target_word_count: int = Field(
+        default=500,
+        description=(
+            "Target total word count for all sections combined. "
+            "Quality Controller flags content deviating significantly."
+        ),
+        examples=[300, 500, 800],
+    )
+
+
+class ComplianceReport(BaseModel):
+    """Brand-guideline compliance check results for generated content.
+
+    ComplianceReport is produced by the Compliance Checker sub-step of the
+    Quality Controller (Agent 2.9).  It verifies that generated content
+    adheres to brand guidelines: correct brand name casing, approved
+    terminology, prohibited phrases, and tone-of-voice consistency.
+
+    When ``is_compliant`` is False, the ``violations`` list contains
+    specific issues and ``suggestions`` provides recommended fixes.  This
+    structured feedback enables the Content Generator to make targeted
+    corrections rather than regenerating from scratch.
+
+    Data Flow::
+
+        PlatformContent + BrandGuidelines
+            |
+            v
+        Compliance Checker (Agent 2.9 sub-step)
+            |
+            v
+        ComplianceReport
+            |
+            +---> is_compliant=True  ---> continue to publication
+            +---> is_compliant=False ---> Content Generator (feedback)
+
+    Attributes:
+        mcm_id: MCM identifier linking this report to the product.
+            Correlation ID used across all pipeline agents.
+        is_compliant: Whether the content passes all brand guideline
+            checks.  True means no violations found; False means at
+            least one violation was detected.
+        violations: List of specific brand guideline violations found.
+            Each entry describes what rule was broken and where.
+            Empty list when ``is_compliant`` is True.
+        suggestions: List of recommended fixes corresponding to the
+            violations.  Provides actionable guidance for the Content
+            Generator to correct issues without full regeneration.
+
+    Examples:
+        Compliant content::
+
+            >>> cr = ComplianceReport(mcm_id="MCM-001", is_compliant=True)
+            >>> cr.violations
+            []
+
+        Non-compliant content::
+
+            >>> cr = ComplianceReport(
+            ...     mcm_id="MCM-001",
+            ...     is_compliant=False,
+            ...     violations=["Brand name lowercase"],
+            ...     suggestions=["Use 'Nike' not 'nike'"],
+            ... )
+            >>> cr.is_compliant
+            False
+    """
+
+    # ------------------------------------------------------------------
+    # Identity field
+    # ------------------------------------------------------------------
+
+    # MCM identifier: correlates this compliance report with the product.
+    mcm_id: str = Field(
+        ...,
+        description=(
+            "MCM identifier linking this compliance report to the product. "
+            "Correlation ID used across all pipeline agents."
+        ),
+        examples=["MCM-001", "MCM-003-RED-38"],
+    )
+
+    # ------------------------------------------------------------------
+    # Compliance result fields
+    # ------------------------------------------------------------------
+
+    # Overall compliance verdict: True if all checks pass, False otherwise.
+    is_compliant: bool = Field(
+        ...,
+        description=(
+            "Whether the content passes all brand guideline checks. "
+            "True = no violations; False = at least one violation found."
+        ),
+        examples=[True, False],
+    )
+
+    # Specific guideline violations found during the compliance check.
+    # Empty list when is_compliant is True.
+    violations: list[str] = Field(
+        default=[],
+        description=(
+            "List of specific brand guideline violations found. "
+            "Each entry describes what rule was broken and where. "
+            "Empty when is_compliant is True."
+        ),
+        examples=[
+            ["Название бренда в нижнем регистре", "Использован запрещённый термин"],
+            [],
+        ],
+    )
+
+    # Recommended fixes for each violation -- actionable feedback.
+    # Enables targeted corrections without full content regeneration.
+    suggestions: list[str] = Field(
+        default=[],
+        description=(
+            "Recommended fixes for violations. Provides actionable "
+            "guidance for the Content Generator to correct issues "
+            "without full regeneration."
+        ),
+        examples=[
+            ["Использовать 'Nike' вместо 'nike'"],
+            [],
+        ],
+    )
+
+
+class FactCheckReport(BaseModel):
+    """Factual accuracy verification results for generated content.
+
+    FactCheckReport is produced by the Fact Checker sub-step of the
+    Quality Controller (Agent 2.9).  It verifies that every factual claim
+    in the generated PlatformContent is supported by the source
+    CuratedProfile data (materials, technologies, measurements, etc.).
+
+    The report distinguishes between *inaccuracies* (claims that
+    contradict the source data) and *unverifiable claims* (claims that
+    cannot be confirmed or denied from available data).  Both types
+    require attention before publication.
+
+    Data Flow::
+
+        PlatformContent + CuratedProfile
+            |
+            v
+        Fact Checker (Agent 2.9 sub-step)
+            |
+            v
+        FactCheckReport
+            |
+            +---> is_accurate=True   ---> continue to publication
+            +---> is_accurate=False  ---> Content Generator (feedback)
+
+    Attributes:
+        mcm_id: MCM identifier linking this report to the product.
+            Correlation ID used across all pipeline agents.
+        is_accurate: Whether all factual claims in the content are
+            verified against the CuratedProfile.  True means no
+            inaccuracies or unverifiable claims found.
+        inaccuracies: List of factual errors found -- claims that
+            directly contradict the CuratedProfile source data.
+            Each entry describes the incorrect claim and the correct
+            value from the source.  Empty when ``is_accurate`` is True.
+        unverifiable_claims: List of claims that cannot be confirmed
+            or denied from the available CuratedProfile data.  These
+            may be marketing superlatives or comparative claims lacking
+            supporting data.
+
+    Examples:
+        Accurate content::
+
+            >>> fcr = FactCheckReport(mcm_id="MCM-001", is_accurate=True)
+            >>> fcr.inaccuracies
+            []
+
+        Content with factual issues::
+
+            >>> fcr = FactCheckReport(
+            ...     mcm_id="MCM-001",
+            ...     is_accurate=False,
+            ...     inaccuracies=["Wrong material listed"],
+            ...     unverifiable_claims=["'lightest model' — no data"],
+            ... )
+            >>> fcr.is_accurate
+            False
+    """
+
+    # ------------------------------------------------------------------
+    # Identity field
+    # ------------------------------------------------------------------
+
+    # MCM identifier: correlates this fact-check report with the product.
+    mcm_id: str = Field(
+        ...,
+        description=(
+            "MCM identifier linking this fact-check report to the product. "
+            "Correlation ID used across all pipeline agents."
+        ),
+        examples=["MCM-001", "MCM-003-RED-38"],
+    )
+
+    # ------------------------------------------------------------------
+    # Accuracy result fields
+    # ------------------------------------------------------------------
+
+    # Overall accuracy verdict: True if all claims verified, False otherwise.
+    is_accurate: bool = Field(
+        ...,
+        description=(
+            "Whether all factual claims are verified against CuratedProfile. "
+            "True = no issues; False = inaccuracies or unverifiable claims."
+        ),
+        examples=[True, False],
+    )
+
+    # Factual errors: claims that contradict the CuratedProfile source data.
+    # Each entry describes the wrong claim and the correct source value.
+    inaccuracies: list[str] = Field(
+        default=[],
+        description=(
+            "Factual errors: claims contradicting CuratedProfile data. "
+            "Each entry describes the incorrect claim and correct value. "
+            "Empty when is_accurate is True."
+        ),
+        examples=[
+            ["Указан материал 'кожа', в CuratedProfile — 'текстиль'"],
+            [],
+        ],
+    )
+
+    # Claims that cannot be confirmed or denied from available data.
+    # Marketing superlatives and comparative claims often fall here.
+    unverifiable_claims: list[str] = Field(
+        default=[],
+        description=(
+            "Claims that cannot be confirmed from CuratedProfile data. "
+            "Often marketing superlatives or comparative claims lacking "
+            "supporting data for verification."
+        ),
+        examples=[
+            ["'самая лёгкая модель' — нет данных для сравнения"],
+            [],
+        ],
+    )
