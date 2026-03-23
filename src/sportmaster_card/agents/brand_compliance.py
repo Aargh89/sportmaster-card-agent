@@ -42,7 +42,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
+
+import yaml
 
 from sportmaster_card.models.content import ComplianceReport, PlatformContent
 
@@ -89,6 +93,10 @@ class BrandComplianceAgent:
         single ComplianceReport.  Content is compliant only if ALL
         checks pass (no violations found).
 
+        Uses real LLM (via CrewAI + OpenRouter) when OPENROUTER_API_KEY
+        is set in the environment. Falls back to deterministic rule-based
+        checking otherwise.
+
         Args:
             content: Generated platform content to verify.
             brand_name: Official brand name with correct casing
@@ -99,6 +107,34 @@ class BrandComplianceAgent:
         Returns:
             ComplianceReport with is_compliant verdict, violations
             list, and suggested fixes for each violation.
+        """
+        if self._is_llm_mode():
+            return self._check_with_llm(content, brand_name, forbidden_words)
+        return self._check_stub(content, brand_name, forbidden_words)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub checking (Phase 1 rule-based, no LLM)
+    # ------------------------------------------------------------------
+
+    def _check_stub(
+        self,
+        content: PlatformContent,
+        brand_name: str,
+        forbidden_words: list[str] | None = None,
+    ) -> ComplianceReport:
+        """Check using deterministic rule-based matching (no LLM).
+
+        This is the original Phase 1 checking logic, preserved for use
+        when no API key is available or for testing.
         """
         violations: list[str] = []
         suggestions: list[str] = []
@@ -127,6 +163,89 @@ class BrandComplianceAgent:
             violations=violations,
             suggestions=suggestions,
         )
+
+    # ------------------------------------------------------------------
+    # LLM checking (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _check_with_llm(
+        self,
+        content: PlatformContent,
+        brand_name: str,
+        forbidden_words: list[str] | None = None,
+    ) -> ComplianceReport:
+        """Check using CrewAI Agent+Task with a real LLM.
+
+        Loads the brand_compliance.yaml prompt template, fills it with
+        content data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub checking if the LLM call fails or returns
+        unparseable output.
+
+        Args:
+            content: Generated platform content to verify.
+            brand_name: Official brand name with correct casing.
+            forbidden_words: Optional list of banned words/phrases.
+
+        Returns:
+            ComplianceReport from LLM output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "brand_compliance.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Format benefits for the prompt
+        benefits_text = "; ".join(
+            f"{b.title}: {b.description}" for b in content.benefits
+        )
+
+        # Fill task template with content data
+        task_desc = prompts["task_template"].format(
+            platform_id=content.platform_id,
+            product_name=content.product_name,
+            description=content.description,
+            benefits=benefits_text,
+            seo_title=content.seo_title,
+            brand=brand_name,
+            brand_name_rules=f"Правильное написание: {brand_name}",
+            forbidden_words=", ".join(forbidden_words or []),
+            required_terminology="",
+            tone_of_voice="professional",
+        )
+
+        agent = Agent(
+            role="Brand Compliance Checker",
+            goal=prompts["system_prompt"],
+            backstory="Brand compliance specialist for Sportmaster",
+            llm=get_llm("claude_haiku"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+            output_pydantic=ComplianceReport,
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            result = crew.kickoff()
+        except Exception:
+            return self._check_stub(content, brand_name, forbidden_words)
+
+        if hasattr(result, "pydantic") and result.pydantic:
+            return result.pydantic
+
+        # Fallback: could not parse LLM output into ComplianceReport
+        return self._check_stub(content, brand_name, forbidden_words)
 
     # ------------------------------------------------------------------
     # Private helpers -- rule-based compliance checks (Phase 1)
