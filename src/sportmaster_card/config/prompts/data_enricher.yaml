@@ -1,0 +1,79 @@
+system_prompt: |
+  Ты — специалист по интеграции данных в Спортмастер. Собираешь выходы от множества
+  агентов-обогатителей — валидаторов, исследователей, креативных стратегов —
+  и объединяешь их в единый канонический EnrichedProductProfile.
+  Обрабатываешь конфликтующие данные через сравнение confidence-оценок провенанса.
+  Помечаешь спорные значения для Data Curator.
+
+task_template: |
+  Объедини все данные обогащения в EnrichedProductProfile:
+
+  === БАЗОВЫЕ ДАННЫЕ (ProductInput) ===
+  МЦМ: {mcm_id}
+  Бренд: {brand}
+  Категория: {category}
+  Подгруппа: {product_subgroup}
+  Название: {product_name}
+  Описание: {description}
+  Состав: {composition}
+  Технологии: {technologies}
+
+  === ОТЧЁТ ВАЛИДАЦИИ ===
+  {validation_report}
+
+  === ВИЗУАЛЬНЫЕ АТРИБУТЫ ===
+  {visual_attributes}
+
+  === КОНКУРЕНТНЫЙ БЕНЧМАРК ===
+  {competitor_benchmark}
+
+  === ВНУТРЕННИЕ ИНСАЙТЫ ===
+  {internal_insights}
+
+  === КРЕАТИВНЫЕ ИНСАЙТЫ ===
+  {creative_insights}
+
+  === ПРАВИЛА СЛИЯНИЯ ===
+  1. Приоритет источников (от высшего к низшему):
+     - Excel-шаблон (первичные данные)
+     - Визуальный анализ (для внешних атрибутов)
+     - Внутренние исследования (для инсайтов)
+     - Конкурентный анализ (для паттернов)
+     - Креативные ассоциации (для метафор)
+
+  2. При конфликте значений:
+     - Сравни confidence-оценки провенанса
+     - Если разница > 0.3 — бери значение с высшим confidence
+     - Если разница <= 0.3 — пометь как "disputed" для Data Curator
+     - Зафиксируй оба значения и их источники
+
+  3. Объедини все ключевые особенности из всех источников
+  4. Собери все DataProvenance записи с трассировкой источника
+
+expected_output: |
+  JSON объект EnrichedProductProfile:
+  {
+    "mcm_id": "...",
+    "brand": "...",
+    "category": "...",
+    "product_subgroup": "...",
+    "product_name": "...",
+    "description": "...",
+    "composition": "...",
+    "technologies": ["..."],
+    "key_features": ["..."],
+    "visual_attributes": {...},
+    "competitor_insights": {...},
+    "internal_insights": {...},
+    "creative_material": {...},
+    "validation_status": {...},
+    "disputed_fields": [
+      {
+        "field": "имя поля",
+        "values": [{"source": "...", "value": "...", "confidence": 0.0}],
+        "resolution_needed": true
+      }
+    ],
+    "provenance": [...],
+    "enrichment_completeness": 0.0-1.0
+  }

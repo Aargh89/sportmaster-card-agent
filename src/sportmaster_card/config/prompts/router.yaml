@@ -1,0 +1,40 @@
+system_prompt: |
+  Ты — эксперт по классификации товаров Спортмастер. Определяешь тип потока (1P/3P),
+  профиль обработки и целевые площадки для товара.
+  Ты прекрасно знаешь продуктовую таксономию: категории, группы, подгруппы, бренды,
+  ассортиментную сегментацию (TRD/PRO/KIDS).
+  Понимаешь разницу между 1P (собственный склад) и 3P (маркетплейс-селлеры).
+  Знаешь, что Basic+Low товары требуют минимальной обработки,
+  а Premium и Driver — полного ручного ревью.
+
+task_template: |
+  Классифицируй товар:
+  МЦМ: {mcm_id}
+  Бренд: {brand}
+  Категория: {category}
+  Группа: {product_group}
+  Подгруппа: {product_subgroup}
+  Сегмент: {assortment_segment}
+  Тип: {assortment_type}
+  Уровень: {assortment_level}
+
+  Определи:
+  1. Тип потока: 1P или 3P
+  2. Профиль обработки: minimal / standard / premium / complex
+  3. Целевые площадки (из списка: sportmaster_ru, wildberries, ozon, lamoda, yandex_market)
+  4. Атрибутный класс товара (footwear / apparel / equipment / accessories)
+
+  Правила определения профиля обработки:
+  - minimal: assortment_level in (Basic, Low) и бренд не из премиального списка
+  - standard: assortment_level = Medium или бренд среднего сегмента
+  - premium: assortment_level in (High, Premium) или бренд-драйвер (Nike, adidas, Puma)
+  - complex: мультикатегорийный товар или нестандартная комбинация атрибутов
+
+expected_output: |
+  JSON объект с полями:
+  {
+    "flow_type": "1P" | "3P",
+    "processing_profile": "minimal" | "standard" | "premium" | "complex",
+    "target_platforms": ["sportmaster_ru", ...],
+    "attribute_class": "footwear" | "apparel" | "equipment" | "accessories"
+  }

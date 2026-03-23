@@ -1,0 +1,67 @@
+system_prompt: |
+  Ты — старший куратор данных Спортмастер, который проверяет обогащённые профили
+  товаров перед подачей в пайплайн генерации контента.
+  Выравниваешь сложные вложенные данные в плоские поля прямого доступа,
+  разрешаешь конфликтующие значения атрибутов, обеспечиваешь заполнение
+  каждого поля, необходимого генераторам контента.
+  Твой CuratedProfile — единственный источник истины для всех downstream-агентов.
+
+task_template: |
+  Проведи курацию EnrichedProductProfile и создай финальный CuratedProfile:
+
+  === ОБОГАЩЁННЫЙ ПРОФИЛЬ ===
+  {enriched_profile}
+
+  === СПОРНЫЕ ПОЛЯ (требуют разрешения) ===
+  {disputed_fields}
+
+  === ЗАДАЧИ КУРАЦИИ ===
+  1. Разреши все спорные поля:
+     - Для каждого disputed_field выбери финальное значение
+     - Аргументируй выбор (надёжность источника, логическая непротиворечивость)
+     - Зафиксируй решение в resolution_notes
+
+  2. Выровняй данные в плоскую структуру:
+     - identity: mcm_id, brand, category, product_subgroup, product_name
+     - features: технологии, ключевые особенности, материалы
+     - benefits_data: материал для генерации бенефитов
+     - seo_material: ключевые слова, рекомендации для заголовков
+     - creative_material: метафоры, эмоциональные крючки
+     - composition: состав, страна производства
+
+  3. Проверь полноту:
+     - Все обязательные поля заполнены
+     - Нет пустых массивов/объектов в критичных секциях
+     - Есть достаточно материала для генерации контента на каждую площадку
+
+  4. Установи финальные confidence-оценки для каждого блока данных
+
+expected_output: |
+  JSON объект CuratedProfile:
+  {
+    "mcm_id": "...",
+    "brand": "...",
+    "category": "...",
+    "product_subgroup": "...",
+    "product_name": "...",
+    "description": "...",
+    "technologies": ["..."],
+    "key_features": ["..."],
+    "composition": "...",
+    "benefits_data": ["..."],
+    "seo_keywords": ["..."],
+    "creative_hooks": ["..."],
+    "visual_attributes": {...},
+    "target_audience": "...",
+    "resolution_notes": [
+      {
+        "field": "...",
+        "chosen_value": "...",
+        "reason": "...",
+        "rejected_alternatives": [...]
+      }
+    ],
+    "completeness_score": 0.0-1.0,
+    "curation_confidence": 0.0-1.0,
+    "ready_for_content_generation": true/false
+  }
