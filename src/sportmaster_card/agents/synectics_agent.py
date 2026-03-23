@@ -66,6 +66,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -73,6 +74,17 @@ import yaml
 
 from sportmaster_card.models.enrichment import CreativeInsights
 from sportmaster_card.models.product_input import ProductInput
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences from LLM output."""
+    text = text.strip()
+    if text.startswith('```'):
+        text = text.split('\n', 1)[1] if '\n' in text else text[3:]
+        if text.endswith('```'):
+            text = text[:-3]
+        text = text.strip()
+    return text
 
 
 class SynecticsAgent:
@@ -322,14 +334,24 @@ class SynecticsAgent:
         crew = Crew(agents=[agent], tasks=[task], verbose=False)
 
         try:
-            crew.kickoff()
-        except Exception:
-            # LLM call failed -- fall back to stub
-            return self._generate_stub(product)
+            result = crew.kickoff()
+            raw = result.raw if hasattr(result, 'raw') else str(result)
 
-        # LLM output is advisory; use stub for structured return
-        # to ensure type safety (CreativeInsights model).
-        return self._generate_stub(product)
+            # Strip markdown code fences
+            raw_clean = _strip_code_fences(raw)
+
+            parsed = json.loads(raw_clean)
+
+            return CreativeInsights(
+                mcm_id=product.mcm_id,
+                metaphors=parsed.get('metaphors', []),
+                associations=parsed.get('associations', []),
+                emotional_hooks=parsed.get('emotional_hooks', []),
+                approved=False,  # Always requires GPTK review
+            )
+        except Exception:
+            # LLM call failed or output unparseable -- fall back to stub
+            return self._generate_stub(product)
 
     # ------------------------------------------------------------------
     # Private helpers
