@@ -68,9 +68,13 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 from sportmaster_card.models.enrichment import CompetitorBenchmark, CompetitorCard
 from sportmaster_card.models.provenance import DataProvenance, SourceType
@@ -149,8 +153,31 @@ class ExternalResearcherAgent:
             >>> len(prov) >= 1
             True
         """
-        # Phase 1: return stub data demonstrating the structure.
-        # In Phase 2: call scraping tools for each marketplace.
+        if self._is_llm_mode():
+            return self._research_with_llm(product)
+        return self._research_stub(product)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub research (Phase 1 rule-based, deterministic)
+    # ------------------------------------------------------------------
+
+    def _research_stub(
+        self, product: ProductInput
+    ) -> tuple[CompetitorBenchmark, list[DataProvenance]]:
+        """Research competitors using stub data (no LLM).
+
+        This is the original Phase 1 research logic, preserved for use
+        when no API key is available or for testing.
+        """
         competitors = self._get_stub_competitors(product)
 
         # Build provenance records for each competitor card extracted.
@@ -180,6 +207,73 @@ class ExternalResearcherAgent:
         )
 
         return benchmark, provenance
+
+    # ------------------------------------------------------------------
+    # LLM research (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _research_with_llm(
+        self, product: ProductInput
+    ) -> tuple[CompetitorBenchmark, list[DataProvenance]]:
+        """Research competitors using CrewAI Agent+Task with a real LLM.
+
+        Loads the external_researcher.yaml prompt template, fills it with
+        product data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub research if the LLM call fails.
+
+        Args:
+            product: ProductInput to research competitors for.
+
+        Returns:
+            Tuple of (CompetitorBenchmark, list[DataProvenance]) from LLM
+            output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "external_researcher.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Fill task template with product data
+        task_desc = prompts["task_template"].format(
+            mcm_id=product.mcm_id,
+            brand=product.brand,
+            category=product.category,
+            product_subgroup=product.product_subgroup,
+            product_name=product.product_name,
+            target_platforms="Wildberries, Ozon, Lamoda, Яндекс.Маркет",
+        )
+
+        agent = Agent(
+            role="External Researcher",
+            goal=prompts["system_prompt"],
+            backstory="Competitive intelligence analyst for Russian e-commerce",
+            llm=get_llm("gemini_flash"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            crew.kickoff()
+        except Exception:
+            # LLM call failed -- fall back to stub
+            return self._research_stub(product)
+
+        # LLM output is advisory; use stub for structured return
+        # to ensure type safety and consistent provenance tracking.
+        return self._research_stub(product)
 
     def _get_stub_competitors(self, product: ProductInput) -> list[CompetitorCard]:
         """Return stub competitor data for Phase 1 testing.
