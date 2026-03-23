@@ -179,3 +179,48 @@ def test_competitor_benchmark_empty_competitors():
     assert benchmark.benchmark_summary == ""
     assert benchmark.average_price is None
     assert benchmark.common_features == []
+
+
+def test_internal_insights_valid():
+    from sportmaster_card.models.enrichment import InternalInsights
+    insights = InternalInsights(
+        mcm_id="MCM-001", insights=["Покупатели ценят амортизацию"],
+        pain_points=["Узкая колодка"], purchase_drivers=["Технология бренда"],
+        source_documents=["UX Report Q1 2026"],
+    )
+    assert len(insights.insights) == 1
+
+def test_creative_insights_valid():
+    from sportmaster_card.models.enrichment import CreativeInsights
+    ci = CreativeInsights(
+        mcm_id="MCM-001", metaphors=["Облако для ваших ног"],
+        associations=["лёгкость", "свобода"], emotional_hooks=["почувствуйте разницу"],
+    )
+    assert ci.approved is False  # Must be approved by ГПТК
+
+def test_enriched_product_profile_valid():
+    from sportmaster_card.models.enrichment import EnrichedProductProfile, ValidationReport, CompetitorBenchmark
+    from sportmaster_card.models.product_input import ProductInput
+    from sportmaster_card.models.provenance import DataProvenanceLog
+    product = ProductInput(mcm_id="MCM-001", brand="Nike", category="Обувь",
+        product_group="Кроссовки", product_subgroup="Беговые", product_name="Pegasus")
+    profile = EnrichedProductProfile(
+        mcm_id="MCM-001", base_product=product,
+        validation_report=ValidationReport(mcm_id="MCM-001", field_validations=[], missing_required=[], overall_completeness=0.9, is_valid=True),
+        competitor_benchmark=CompetitorBenchmark(mcm_id="MCM-001"),
+        provenance_log=DataProvenanceLog(mcm_id="MCM-001"),
+    )
+    assert profile.base_product.brand == "Nike"
+
+def test_curated_profile_valid():
+    from sportmaster_card.models.enrichment import CuratedProfile
+    from sportmaster_card.models.provenance import DataProvenanceLog
+    cp = CuratedProfile(
+        mcm_id="MCM-001", product_name="Nike Pegasus 41", brand="Nike",
+        category="Обувь", description="Беговые кроссовки",
+        key_features=["Air Zoom"], technologies=["React"],
+        composition={"Верх": "Текстиль"}, benefits_data=["Отличная амортизация"],
+        seo_material=["беговые кроссовки nike"], provenance_log=DataProvenanceLog(mcm_id="MCM-001"),
+    )
+    assert cp.brand == "Nike"
+    assert len(cp.technologies) == 1

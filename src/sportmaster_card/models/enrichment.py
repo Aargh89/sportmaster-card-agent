@@ -1,6 +1,6 @@
-"""UC1 Enrichment output models -- ValidationReport and CompetitorBenchmark.
+"""UC1 Enrichment output models -- full pipeline from validation to curated profile.
 
-This module defines data models for two key agents in the UC1 Enrichment pipeline:
+This module defines data models for all key agents in the UC1 Enrichment pipeline:
 
 1. **Data Validator (Agent 1.3)** produces a ``ValidationReport`` after checking
    each field in the ProductInput for presence, correctness, and completeness.
@@ -12,11 +12,39 @@ This module defines data models for two key agents in the UC1 Enrichment pipelin
    Ozon, Lamoda, etc.). The benchmark aggregates competitor data to provide
    pricing intelligence, feature analysis, and content inspiration.
 
+3. **Internal Researcher (Agent 1.6)** produces ``InternalInsights`` by mining
+   Sportmaster's internal knowledge bases -- UX research, return-reason logs,
+   customer reviews, and category-manager notes -- to surface purchase drivers,
+   pain points, and customer insights that external sources cannot provide.
+
+4. **Creative Strategist (Agent 1.7 / ГПТК)** produces ``CreativeInsights``
+   containing brand-safe metaphors, emotional hooks, and word associations
+   that content generators can weave into product card copy. All creative
+   output requires explicit GPTK approval before use (``approved=False`` by
+   default).
+
+5. **Data Enricher (Agent 1.8)** aggregates all upstream outputs into an
+   ``EnrichedProductProfile`` -- the single canonical record that content
+   generators consume. It bundles the base product, validation report,
+   competitor benchmark, and provenance log into one object.
+
+6. **Data Curator (Agent 1.10)** reviews the enriched profile, resolves
+   disputes, and produces the final ``CuratedProfile`` -- a flat, ready-to-use
+   data object with all fields needed for content generation across all
+   marketplace platforms.
+
 Module-level design decisions:
     - FieldValidation is a fine-grained per-field result; ValidationReport
       aggregates these into a single report per MCM product.
     - CompetitorCard captures one competitor listing; CompetitorBenchmark
       aggregates multiple listings into actionable insights.
+    - InternalInsights and CreativeInsights carry list-of-string fields for
+      flexible, open-ended agent output; no rigid schema for creative content.
+    - EnrichedProductProfile composes upstream models by reference (not copy),
+      keeping a single source of truth for each data element.
+    - CuratedProfile is intentionally flat (no nested models except
+      provenance_log) so that content generators can access fields directly
+      without navigating a deep object tree.
     - All collection fields default to empty (not None) for safe iteration.
     - overall_completeness is a float in [0, 1] representing the fraction
       of fields that are present and filled in the source Excel row.
@@ -35,17 +63,30 @@ Data flow in the UC1 pipeline::
     External Researcher (1.5) ---> CompetitorBenchmark
         |                              |
         v                              v
-    Internal Researcher (1.6)     (feeds into Data Enricher)
-        |
-        v
-    Data Enricher (1.8) <--- aggregates all upstream outputs
+    Internal Researcher (1.6) ---> InternalInsights
+        |                              |
+        v                              v
+    Creative Strategist (1.7) ---> CreativeInsights
+        |                              |
+        v                              v
+    Data Enricher (1.8) ---------> EnrichedProductProfile
+        |                              |
+        v                              v
+    Data Curator (1.10) ---------> CuratedProfile
+                                       |
+                                       v
+                                  UC2 Content Generators
 
 Typical usage::
 
     from sportmaster_card.models.enrichment import (
         CompetitorBenchmark,
         CompetitorCard,
+        CreativeInsights,
+        CuratedProfile,
+        EnrichedProductProfile,
         FieldValidation,
+        InternalInsights,
         ValidationReport,
     )
 
@@ -76,6 +117,9 @@ from __future__ import annotations
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from sportmaster_card.models.product_input import ProductInput
+from sportmaster_card.models.provenance import DataProvenanceLog
 
 
 class FieldValidation(BaseModel):
@@ -689,4 +733,693 @@ class CompetitorBenchmark(BaseModel):
             "if applicable. Empty list if no common features were identified."
         ),
         examples=[["Air Zoom", "амортизация"], ["Boost", "Primeknit", "Continental"]],
+    )
+
+
+class InternalInsights(BaseModel):
+    """Internal Researcher output: insights mined from Sportmaster knowledge bases.
+
+    The Internal Researcher agent (1.6) analyses Sportmaster's proprietary data
+    sources -- UX research reports, product-return logs, customer reviews from
+    sportmaster.ru, and category-manager notes -- to surface actionable insights
+    that are invisible to external research.
+
+    These insights fill a critical gap: competitor benchmarks tell us what the
+    *market* says, but InternalInsights tells us what *our customers* actually
+    experience, complain about, and value when buying this type of product.
+
+    ASCII Schema::
+
+        +---------------------------------------------------------------+
+        |                    InternalInsights                           |
+        +---------------------------------------------------------------+
+        | Field             | Type        | Example                     |
+        +-------------------+-------------+-----------------------------|
+        | mcm_id            | str         | "MCM-001"                   |
+        | insights          | list[str]   | ["Покупатели ценят..."]     |
+        | pain_points       | list[str]   | ["Узкая колодка"]           |
+        | purchase_drivers  | list[str]   | ["Технология бренда"]       |
+        | source_documents  | list[str]   | ["UX Report Q1 2026"]       |
+        +---------------------------------------------------------------+
+
+        Data sources mined by the Internal Researcher::
+
+            Sportmaster Internal Systems
+                |
+                +---> UX research reports  --> insights, pain_points
+                +---> Return-reason logs   --> pain_points
+                +---> Customer reviews     --> insights, purchase_drivers
+                +---> Category-mgr notes   --> purchase_drivers
+                |
+                v
+            InternalInsights(mcm_id="MCM-...")
+                |
+                v
+            Data Enricher (1.8) uses these to fill description gaps
+
+    Attributes:
+        mcm_id: MCM identifier linking these insights to the product being
+            enriched. Serves as the correlation key across all pipeline agents.
+        insights: General customer insights extracted from internal sources.
+            Free-form observations about how customers perceive, use, or
+            evaluate this type of product. Each string is one insight.
+        pain_points: Known customer complaints and frustrations related to
+            this product type. Extracted from return reasons, negative reviews,
+            and UX research findings. Content generators use these to craft
+            preemptive reassurance copy.
+        purchase_drivers: Factors that motivate customers to buy this product
+            type. Extracted from positive reviews, purchase-funnel analytics,
+            and category-manager domain knowledge.
+        source_documents: List of internal document identifiers or titles that
+            were consulted to produce these insights. Provides an audit trail
+            for the Data Curator to verify claims.
+
+    Examples:
+        Insights from UX research::
+
+            >>> ins = InternalInsights(
+            ...     mcm_id="MCM-001",
+            ...     insights=["Покупатели ценят амортизацию"],
+            ...     pain_points=["Узкая колодка"],
+            ...     purchase_drivers=["Технология бренда"],
+            ...     source_documents=["UX Report Q1 2026"],
+            ... )
+            >>> len(ins.insights)
+            1
+
+        Empty insights (no internal data found)::
+
+            >>> ins = InternalInsights(mcm_id="MCM-NEW-001")
+            >>> ins.insights
+            []
+    """
+
+    # ------------------------------------------------------------------
+    # MCM identifier -- links insights to the product being enriched
+    # ------------------------------------------------------------------
+
+    # Correlation key tying internal research back to the product.
+    # The Data Enricher joins on mcm_id to merge internal insights
+    # with competitor benchmarks and validation results.
+    mcm_id: str = Field(
+        ...,
+        description=(
+            "MCM identifier linking these internal insights to the product "
+            "being enriched. Correlation key across all pipeline agents."
+        ),
+        examples=["MCM-001", "MCM-001-BLK-42"],
+    )
+
+    # ------------------------------------------------------------------
+    # Insight categories -- structured output from internal research
+    # ------------------------------------------------------------------
+
+    # General insights: observations about customer perception and usage.
+    # Each entry is a self-contained insight sentence in Russian.
+    insights: list[str] = Field(
+        default=[],
+        description=(
+            "General customer insights from internal sources: how customers "
+            "perceive, use, or evaluate this product type. Each string is "
+            "one self-contained insight in Russian."
+        ),
+        examples=[
+            ["Покупатели ценят амортизацию", "Часто покупают для марафонов"],
+        ],
+    )
+
+    # Pain points: specific complaints and frustrations.
+    # Content generators use these to write preemptive reassurance copy
+    # (e.g., "Обновлённая колодка стала шире на 3 мм").
+    pain_points: list[str] = Field(
+        default=[],
+        description=(
+            "Known customer complaints and frustrations for this product type. "
+            "Extracted from returns, negative reviews, and UX research. "
+            "Used by content generators for preemptive reassurance copy."
+        ),
+        examples=[["Узкая колодка", "Быстрый износ подошвы"]],
+    )
+
+    # Purchase drivers: what makes customers click "buy".
+    # Used to prioritize which features to highlight in the product card.
+    purchase_drivers: list[str] = Field(
+        default=[],
+        description=(
+            "Factors motivating purchase of this product type. Extracted from "
+            "positive reviews, purchase analytics, and category-manager notes. "
+            "Guides content generators on which features to emphasize."
+        ),
+        examples=[["Технология бренда", "Соотношение цена/качество"]],
+    )
+
+    # Source documents: audit trail for the Data Curator.
+    # Each entry identifies a document that was consulted.
+    source_documents: list[str] = Field(
+        default=[],
+        description=(
+            "Internal document identifiers or titles consulted to produce "
+            "these insights. Provides an audit trail for the Data Curator "
+            "to verify claims and trace data lineage."
+        ),
+        examples=[["UX Report Q1 2026", "Returns Analysis FW25"]],
+    )
+
+
+class CreativeInsights(BaseModel):
+    """Creative Strategist output: brand-safe metaphors, hooks, and associations.
+
+    The Creative Strategist agent (1.7 / GPTK -- Группа Подготовки Текстового
+    Контента) generates creative language elements that content generators can
+    weave into product card copy. Unlike factual data (InternalInsights,
+    CompetitorBenchmark), creative output is subjective and requires explicit
+    human approval before use in published content.
+
+    The ``approved`` flag defaults to False. Only after a GPTK team member
+    reviews and approves the creative output does it become usable by
+    downstream content generation agents.
+
+    ASCII Schema::
+
+        +---------------------------------------------------------------+
+        |                    CreativeInsights                           |
+        +---------------------------------------------------------------+
+        | Field           | Type        | Example                       |
+        +-----------------+-------------+-------------------------------|
+        | mcm_id          | str         | "MCM-001"                     |
+        | metaphors       | list[str]   | ["Облако для ваших ног"]      |
+        | associations    | list[str]   | ["лёгкость", "свобода"]       |
+        | emotional_hooks | list[str]   | ["почувствуйте разницу"]      |
+        | approved        | bool        | False (until ГПТК approves)   |
+        +---------------------------------------------------------------+
+
+        Approval workflow::
+
+            Creative Strategist (1.7)
+                |
+                v
+            CreativeInsights(approved=False)
+                |
+                v
+            ГПТК Human Review
+                |
+                +--> approved=True  --> Content Generators may use
+                |
+                +--> approved=False --> Content Generators must skip
+
+    Attributes:
+        mcm_id: MCM identifier linking creative insights to the product.
+            Correlation key across the pipeline.
+        metaphors: Brand-safe metaphors and figurative language suggested
+            for this product. Each string is one metaphor or simile in
+            Russian. Must be reviewed for brand safety before use.
+        associations: Word associations and conceptual links that evoke
+            the desired emotional response. Used to enrich product
+            descriptions with sensory and lifestyle language.
+        emotional_hooks: Short phrases designed to trigger an emotional
+            buying response. Used in headlines, bullet points, and call-
+            to-action elements of the product card.
+        approved: Whether GPTK has approved this creative output for use
+            in published content. Defaults to False. Content generators
+            MUST check this flag and skip unapproved creative material.
+
+    Examples:
+        Pending approval (default state)::
+
+            >>> ci = CreativeInsights(
+            ...     mcm_id="MCM-001",
+            ...     metaphors=["Облако для ваших ног"],
+            ...     associations=["лёгкость", "свобода"],
+            ...     emotional_hooks=["почувствуйте разницу"],
+            ... )
+            >>> ci.approved
+            False
+
+        After GPTK approval::
+
+            >>> ci = CreativeInsights(
+            ...     mcm_id="MCM-001",
+            ...     metaphors=["Облако для ваших ног"],
+            ...     approved=True,
+            ... )
+            >>> ci.approved
+            True
+    """
+
+    # ------------------------------------------------------------------
+    # MCM identifier -- links creative output to the product
+    # ------------------------------------------------------------------
+
+    # Every creative output is tied to a specific product via mcm_id.
+    # The Data Enricher and Content Generators join on this key.
+    mcm_id: str = Field(
+        ...,
+        description=(
+            "MCM identifier linking creative insights to the product. "
+            "Correlation key across all pipeline agents."
+        ),
+        examples=["MCM-001", "MCM-001-BLK-42"],
+    )
+
+    # ------------------------------------------------------------------
+    # Creative language elements
+    # ------------------------------------------------------------------
+
+    # Metaphors: figurative language for enriching product descriptions.
+    # Each entry is one metaphor or simile in Russian.
+    metaphors: list[str] = Field(
+        default=[],
+        description=(
+            "Brand-safe metaphors and figurative language for this product. "
+            "Each string is one metaphor or simile in Russian. Must be "
+            "reviewed by ГПТК for brand safety before use in content."
+        ),
+        examples=[["Облако для ваших ног", "Второе дыхание для ваших стоп"]],
+    )
+
+    # Associations: evocative words linked to the product experience.
+    # Content generators sprinkle these into descriptions for richness.
+    associations: list[str] = Field(
+        default=[],
+        description=(
+            "Word associations evoking the desired emotional response. "
+            "Used to enrich product descriptions with sensory and lifestyle "
+            "language. Each string is one word or short phrase in Russian."
+        ),
+        examples=[["лёгкость", "свобода", "энергия"]],
+    )
+
+    # Emotional hooks: short, punchy phrases for headlines and CTAs.
+    # Designed to trigger an emotional buying impulse.
+    emotional_hooks: list[str] = Field(
+        default=[],
+        description=(
+            "Short phrases designed to trigger an emotional buying response. "
+            "Used in headlines, bullet points, and call-to-action elements. "
+            "Each string is one hook phrase in Russian."
+        ),
+        examples=[["почувствуйте разницу", "бегите дальше, чем вчера"]],
+    )
+
+    # ------------------------------------------------------------------
+    # Approval gate -- GPTK must approve before content use
+    # ------------------------------------------------------------------
+
+    # Defaults to False. Content generators MUST check this flag.
+    # Only after a human GPTK reviewer sets approved=True can these
+    # creative elements appear in published product card content.
+    approved: bool = Field(
+        default=False,
+        description=(
+            "Whether ГПТК (Creative Content Team) has approved this output "
+            "for use in published content. Defaults to False. Content "
+            "generators MUST skip unapproved creative material."
+        ),
+    )
+
+
+class EnrichedProductProfile(BaseModel):
+    """Data Enricher output: aggregated enrichment data for one MCM product.
+
+    The Data Enricher agent (1.8) is the convergence point of the UC1 pipeline.
+    It collects outputs from all upstream agents -- the original ProductInput,
+    the ValidationReport, the CompetitorBenchmark, and the DataProvenanceLog --
+    and bundles them into a single EnrichedProductProfile.
+
+    This profile is the canonical input for the Data Curator (1.10), which
+    reviews it, resolves disputes, and produces the final CuratedProfile.
+
+    ASCII Schema::
+
+        +---------------------------------------------------------------+
+        |                 EnrichedProductProfile                        |
+        +---------------------------------------------------------------+
+        | Field                | Type                  | Source Agent    |
+        +----------------------+-----------------------+----------------|
+        | mcm_id               | str                   | (identity)     |
+        | base_product         | ProductInput          | Excel import   |
+        | validation_report    | ValidationReport      | Agent 1.3      |
+        | competitor_benchmark | CompetitorBenchmark   | Agent 1.5      |
+        | internal_insights    | InternalInsights|None | Agent 1.6      |
+        | creative_insights    | CreativeInsights|None | Agent 1.7      |
+        | provenance_log       | DataProvenanceLog     | All agents     |
+        +---------------------------------------------------------------+
+
+        Aggregation flow::
+
+            ProductInput --------+
+            ValidationReport ----+
+            CompetitorBenchmark -+----> EnrichedProductProfile
+            InternalInsights ----+           |
+            CreativeInsights ----+           v
+            DataProvenanceLog ---+     Data Curator (1.10)
+                                             |
+                                             v
+                                       CuratedProfile
+
+    Attributes:
+        mcm_id: MCM identifier for this enriched profile. Must match the
+            mcm_id of all nested models for data consistency.
+        base_product: The original ProductInput parsed from the Excel row.
+            Carries all raw fields as received from the supplier.
+        validation_report: Data Validator output describing field completeness
+            and validity of the base product.
+        competitor_benchmark: External Researcher output with competitive
+            intelligence from marketplace scraping.
+        internal_insights: Internal Researcher output with customer insights
+            from Sportmaster knowledge bases. None if internal research was
+            not performed (e.g., new category with no historical data).
+        creative_insights: Creative Strategist output with metaphors and
+            emotional hooks. None if creative generation was skipped.
+        provenance_log: Aggregated provenance log tracking the origin of
+            every attribute value across all enrichment agents.
+
+    Examples:
+        Full enrichment profile::
+
+            >>> profile = EnrichedProductProfile(
+            ...     mcm_id="MCM-001",
+            ...     base_product=ProductInput(
+            ...         mcm_id="MCM-001", brand="Nike", category="Обувь",
+            ...         product_group="Кроссовки", product_subgroup="Беговые",
+            ...         product_name="Pegasus",
+            ...     ),
+            ...     validation_report=ValidationReport(
+            ...         mcm_id="MCM-001", field_validations=[],
+            ...         missing_required=[], overall_completeness=0.9,
+            ...         is_valid=True,
+            ...     ),
+            ...     competitor_benchmark=CompetitorBenchmark(mcm_id="MCM-001"),
+            ...     provenance_log=DataProvenanceLog(mcm_id="MCM-001"),
+            ... )
+            >>> profile.base_product.brand
+            'Nike'
+    """
+
+    # ------------------------------------------------------------------
+    # MCM identifier -- must match all nested models
+    # ------------------------------------------------------------------
+
+    # The mcm_id here acts as the top-level correlation key. All nested
+    # models (base_product, validation_report, etc.) should carry the
+    # same mcm_id for data integrity.
+    mcm_id: str = Field(
+        ...,
+        description=(
+            "MCM identifier for this enriched profile. Must match the "
+            "mcm_id of all nested models for data consistency."
+        ),
+        examples=["MCM-001", "MCM-001-BLK-42"],
+    )
+
+    # ------------------------------------------------------------------
+    # Upstream agent outputs -- composed by reference
+    # ------------------------------------------------------------------
+
+    # The original product data from the Excel import.
+    # This is the raw input that all enrichment agents worked on.
+    base_product: ProductInput = Field(
+        ...,
+        description=(
+            "Original ProductInput from the Excel row. Carries all raw "
+            "fields as received from the supplier before enrichment."
+        ),
+    )
+
+    # Validation results from the Data Validator (Agent 1.3).
+    # Tells the Data Curator which fields passed and which need attention.
+    validation_report: ValidationReport = Field(
+        ...,
+        description=(
+            "Data Validator output: field completeness and validity checks. "
+            "Used by the Data Curator to assess data quality."
+        ),
+    )
+
+    # Competitive intelligence from the External Researcher (Agent 1.5).
+    # Provides market context for pricing and feature gap analysis.
+    competitor_benchmark: CompetitorBenchmark = Field(
+        ...,
+        description=(
+            "External Researcher output: competitor pricing, features, and "
+            "content patterns from marketplace scraping."
+        ),
+    )
+
+    # Internal insights from the Internal Researcher (Agent 1.6).
+    # None when no internal data is available for this product type.
+    internal_insights: Optional[InternalInsights] = Field(
+        default=None,
+        description=(
+            "Internal Researcher output: customer insights from Sportmaster "
+            "knowledge bases. None if internal research was not performed."
+        ),
+    )
+
+    # Creative language elements from the Creative Strategist (Agent 1.7).
+    # None when creative generation was skipped or not yet run.
+    creative_insights: Optional[CreativeInsights] = Field(
+        default=None,
+        description=(
+            "Creative Strategist output: metaphors, associations, and "
+            "emotional hooks. None if creative generation was skipped."
+        ),
+    )
+
+    # Aggregated provenance log covering all attribute extractions.
+    # The Data Curator reviews this to resolve disputed values.
+    provenance_log: DataProvenanceLog = Field(
+        ...,
+        description=(
+            "Aggregated provenance log tracking the origin of every "
+            "attribute value across all enrichment agents."
+        ),
+    )
+
+
+class CuratedProfile(BaseModel):
+    """Data Curator output: final flat profile ready for content generation.
+
+    The Data Curator agent (1.10) reviews the EnrichedProductProfile, resolves
+    any disputed attribute values, and produces a CuratedProfile -- a flat,
+    ready-to-use data object containing all fields that content generators
+    need to create product card copy for every target marketplace.
+
+    The CuratedProfile is intentionally denormalized: instead of nesting
+    ProductInput, ValidationReport, etc., it extracts the final resolved
+    values into top-level fields. This design lets content generators access
+    any field with a single attribute lookup (``cp.brand``) instead of
+    navigating a deep object tree (``profile.base_product.brand``).
+
+    ASCII Schema::
+
+        +---------------------------------------------------------------+
+        |                      CuratedProfile                           |
+        +---------------------------------------------------------------+
+        | Field           | Type              | Example                 |
+        +-----------------+-------------------+-------------------------|
+        | mcm_id          | str               | "MCM-001"               |
+        | product_name    | str               | "Nike Pegasus 41"       |
+        | brand           | str               | "Nike"                  |
+        | category        | str               | "Обувь"                 |
+        | description     | str               | "Беговые кроссовки"     |
+        | key_features    | list[str]         | ["Air Zoom"]            |
+        | technologies    | list[str]         | ["React"]               |
+        | composition     | dict[str,str]     | {"Верх": "Текстиль"}    |
+        | benefits_data   | list[str]         | ["Отличная амортиз."]   |
+        | seo_material    | list[str]         | ["кроссовки nike"]      |
+        | provenance_log  | DataProvenanceLog | log                     |
+        +---------------------------------------------------------------+
+
+        Consumption by UC2 Content Generators::
+
+            CuratedProfile
+                |
+                +---> UC2 Copywriter: uses description, benefits_data
+                +---> UC2 SEO Agent: uses seo_material, key_features
+                +---> UC2 Platform Adapter: uses all fields per platform
+                |
+                v
+            Platform-specific product cards (WB, Ozon, Lamoda, ...)
+
+    Attributes:
+        mcm_id: MCM identifier for this curated profile.
+        product_name: Final resolved product name after curation. May differ
+            from the original Excel value if the Curator improved it.
+        brand: Brand name, verified and normalized by the Curator.
+        category: Product category from the Sportmaster taxonomy.
+        description: Curated product description, enriched and validated.
+            This is the base text that content generators will adapt for
+            each marketplace platform.
+        key_features: Curated list of key product features to highlight.
+            Merged from supplier data, competitor analysis, and internal
+            insights. Ordered by importance for content generators.
+        technologies: List of brand technologies used in the product.
+            Verified against known technology databases by the Curator.
+        composition: Material composition as component-to-material mapping.
+            Verified and normalized by the Curator.
+        benefits_data: Customer-facing benefit statements derived from
+            features, internal insights, and competitive positioning.
+            Ready to be inserted into product card copy.
+        seo_material: SEO keywords and phrases for search optimization.
+            Derived from competitor analysis, search trends, and category
+            keyword databases. Used by the SEO Agent in UC2.
+        provenance_log: Full provenance log carried through from the
+            EnrichedProductProfile. Preserved for audit trail and
+            quality control purposes.
+
+    Examples:
+        Complete curated profile::
+
+            >>> cp = CuratedProfile(
+            ...     mcm_id="MCM-001",
+            ...     product_name="Nike Pegasus 41",
+            ...     brand="Nike",
+            ...     category="Обувь",
+            ...     description="Беговые кроссовки",
+            ...     key_features=["Air Zoom"],
+            ...     technologies=["React"],
+            ...     composition={"Верх": "Текстиль"},
+            ...     benefits_data=["Отличная амортизация"],
+            ...     seo_material=["беговые кроссовки nike"],
+            ...     provenance_log=DataProvenanceLog(mcm_id="MCM-001"),
+            ... )
+            >>> cp.brand
+            'Nike'
+    """
+
+    # ------------------------------------------------------------------
+    # Product identity -- flat fields resolved by the Data Curator
+    # ------------------------------------------------------------------
+
+    # MCM identifier: same key used throughout the entire pipeline.
+    # Links this curated output back to the original ProductInput.
+    mcm_id: str = Field(
+        ...,
+        description=(
+            "MCM identifier for this curated profile. Links back to the "
+            "original ProductInput and all upstream enrichment outputs."
+        ),
+        examples=["MCM-001", "MCM-001-BLK-42"],
+    )
+
+    # Product name: may be improved by the Curator (e.g., adding model year).
+    # Content generators use this as the base product title.
+    product_name: str = Field(
+        ...,
+        description=(
+            "Final resolved product name after curation. May differ from "
+            "the original Excel value if the Curator improved it."
+        ),
+        examples=["Nike Pegasus 41", "Adidas Ultraboost Light"],
+    )
+
+    # Brand name: verified against the Sportmaster brand registry.
+    # Normalized to the official spelling (e.g., "Nike" not "NIKE").
+    brand: str = Field(
+        ...,
+        description=(
+            "Brand name verified and normalized by the Curator. "
+            "Matches the official Sportmaster brand registry spelling."
+        ),
+        examples=["Nike", "Adidas", "Puma"],
+    )
+
+    # Category: top-level taxonomy node, carried through from ProductInput.
+    # Used by platform adapters for category mapping on each marketplace.
+    category: str = Field(
+        ...,
+        description=(
+            "Product category from the Sportmaster taxonomy. Used by "
+            "platform adapters for marketplace category mapping."
+        ),
+        examples=["Обувь", "Одежда", "Аксессуары"],
+    )
+
+    # ------------------------------------------------------------------
+    # Content-ready fields -- used directly by UC2 content generators
+    # ------------------------------------------------------------------
+
+    # Description: enriched and validated base text for content generation.
+    # Content generators adapt this for each marketplace's tone and format.
+    description: str = Field(
+        ...,
+        description=(
+            "Curated product description, enriched and validated. Base text "
+            "that content generators adapt for each marketplace platform."
+        ),
+    )
+
+    # Key features: ordered by importance for content prioritization.
+    # Merged from supplier data, competitor analysis, and internal insights.
+    key_features: list[str] = Field(
+        default=[],
+        description=(
+            "Curated list of key product features ordered by importance. "
+            "Merged from supplier data, competitor analysis, and internal "
+            "insights. Content generators highlight these in bullet points."
+        ),
+        examples=[["Air Zoom", "React", "Flywire"]],
+    )
+
+    # Technologies: verified brand technology names.
+    # Used in technical specs and feature callouts.
+    technologies: list[str] = Field(
+        default=[],
+        description=(
+            "Brand technologies used in the product, verified against known "
+            "technology databases. Used in technical specs and feature callouts."
+        ),
+        examples=[["React", "Air Zoom", "Flyknit"]],
+    )
+
+    # Composition: normalized material specs for regulatory compliance.
+    # Required by Russian marketplace regulations for certain categories.
+    composition: dict[str, str] = Field(
+        default={},
+        description=(
+            "Material composition as component-to-material mapping. "
+            "Verified and normalized by the Curator. Required by "
+            "marketplace regulations for certain product categories."
+        ),
+        examples=[{"Верх": "Текстиль", "Подошва": "Резина"}],
+    )
+
+    # Benefits: customer-facing benefit statements ready for copy.
+    # Derived from features + internal insights + competitive positioning.
+    benefits_data: list[str] = Field(
+        default=[],
+        description=(
+            "Customer-facing benefit statements derived from features, "
+            "internal insights, and competitive positioning. Ready for "
+            "direct insertion into product card copy."
+        ),
+        examples=[["Отличная амортизация", "Дышащий верх"]],
+    )
+
+    # SEO material: keywords and phrases for search optimization.
+    # The SEO Agent in UC2 uses these to optimize titles and descriptions.
+    seo_material: list[str] = Field(
+        default=[],
+        description=(
+            "SEO keywords and phrases for search optimization on marketplaces. "
+            "Derived from competitor analysis, search trends, and category "
+            "keyword databases. Used by the UC2 SEO Agent."
+        ),
+        examples=[["беговые кроссовки nike", "кроссовки для бега мужские"]],
+    )
+
+    # ------------------------------------------------------------------
+    # Audit trail -- provenance preserved for quality control
+    # ------------------------------------------------------------------
+
+    # Full provenance log from the EnrichedProductProfile.
+    # Preserved so that quality controllers can trace every field value
+    # back to its original source and extraction agent.
+    provenance_log: DataProvenanceLog = Field(
+        ...,
+        description=(
+            "Full provenance log from the EnrichedProductProfile. Preserved "
+            "for audit trail, dispute resolution, and quality control."
+        ),
     )
