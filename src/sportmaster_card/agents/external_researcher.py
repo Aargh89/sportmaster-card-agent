@@ -157,36 +157,40 @@ class ExternalResearcherAgent:
             True
         """
         if self._is_llm_mode():
-            return self._research_wb_api(product)
+            return self._research_real(product)
         return self._research_stub(product)
 
     # ------------------------------------------------------------------
     # Real WB Search API research
     # ------------------------------------------------------------------
 
-    def _research_wb_api(
+    def _research_real(
         self, product: ProductInput
     ) -> tuple[CompetitorBenchmark, list[DataProvenance]]:
-        """Research competitors using REAL Wildberries Search API.
+        """Research competitors on WB and Ozon using real APIs.
 
-        Builds search queries from product attributes, calls WB API,
-        parses results into CompetitorCard objects. Falls back to stub
-        if WB API is unavailable or returns no results.
+        Builds search queries from product attributes, calls both WB and
+        Ozon APIs, parses results into CompetitorCard objects. Falls back
+        to stub if neither API returns results.
 
         Strategy:
-            1. Build 3-4 search queries (specific → general)
-            2. Try each query until we get results
-            3. Convert WBProduct → CompetitorCard
+            1. Search Wildberries (3-4 queries, specific -> general)
+            2. Search Ozon (brand + subgroup query)
+            3. Convert results -> CompetitorCard
             4. Build provenance records
             5. Aggregate into CompetitorBenchmark
         """
         import logging
+        import time
+
         logger = logging.getLogger(__name__)
 
+        all_competitors: list[CompetitorCard] = []
+
+        # 1. Search Wildberries
         try:
             from sportmaster_card.tools.wb_search import wb_search, build_search_queries
 
-            # Build search queries from product attributes
             queries = build_search_queries(
                 brand=product.brand,
                 product_name=product.product_name,
@@ -194,81 +198,82 @@ class ExternalResearcherAgent:
                 product_subgroup=product.product_subgroup,
                 technologies=product.technologies,
             )
-
-            # Try each query until we get results
-            wb_products = []
-            used_query = ""
             for query in queries:
-                wb_products = wb_search(
-                    query=query,
-                    max_results=10,
-                    min_rating=4.0,
-                    sort="popular",
-                )
+                wb_products = wb_search(query=query, max_results=5, min_rating=4.0)
                 if wb_products:
-                    used_query = query
-                    logger.info("WB search '%s' returned %d products", query, len(wb_products))
+                    for wp in wb_products:
+                        card = CompetitorCard(
+                            platform="wb",
+                            product_name=f"{wp.brand} {wp.name}",
+                            description=wp.description or f"Рейтинг {wp.rating}/5, {wp.feedbacks} отзывов",
+                            price=float(wp.price),
+                            rating=wp.rating,
+                            key_features=[
+                                f"Цена: {wp.price}₽",
+                                f"Рейтинг: {wp.rating}",
+                                f"Отзывы: {wp.feedbacks}",
+                            ],
+                            url=wp.url,
+                        )
+                        all_competitors.append(card)
                     break
-                import time
-                time.sleep(2)  # Rate limiting between queries
-
-            if not wb_products:
-                logger.warning("WB search returned no results, falling back to stub")
-                return self._research_stub(product)
-
-            # Convert WBProduct → CompetitorCard
-            competitors = []
-            for wp in wb_products[:10]:
-                card = CompetitorCard(
-                    platform="wb",
-                    product_name=f"{wp.brand} {wp.name}",
-                    description=f"Рейтинг {wp.rating}/5, {wp.feedbacks} отзывов",
-                    price=float(wp.price),
-                    rating=wp.rating,
-                    key_features=[
-                        f"Цена: {wp.price}₽",
-                        f"Рейтинг: {wp.rating}",
-                        f"Отзывы: {wp.feedbacks}",
-                        f"Скидка: {wp.sale_percent}%",
-                    ],
-                    url=wp.url,
-                )
-                competitors.append(card)
-
-            # Build provenance
-            provenance = self._build_provenance(competitors)
-
-            # Calculate averages
-            prices = [c.price for c in competitors if c.price]
-            avg_price = sum(prices) / len(prices) if prices else None
-
-            # Find common features
-            all_features = [f for c in competitors for f in c.key_features]
-            from collections import Counter
-            feature_counts = Counter(all_features)
-            common = [f for f, count in feature_counts.items() if count >= 2]
-
-            benchmark = CompetitorBenchmark(
-                mcm_id=product.mcm_id,
-                competitors=competitors,
-                benchmark_summary=(
-                    f"WB поиск '{used_query}': найдено {len(competitors)} товаров. "
-                    f"Средняя цена: {avg_price:.0f}₽. "
-                    f"Средний рейтинг: {sum(c.rating for c in competitors if c.rating) / len(competitors):.1f}"
-                ),
-                average_price=avg_price,
-                common_features=common,
-            )
-
-            logger.info(
-                "WB research complete: %d competitors, avg price %.0f₽",
-                len(competitors), avg_price or 0,
-            )
-            return benchmark, provenance
-
+                time.sleep(2)
         except Exception as e:
-            logger.error("WB API research failed: %s, falling back to stub", e)
+            logger.warning("WB search failed: %s", e)
+
+        # 2. Search Ozon
+        try:
+            from sportmaster_card.tools.ozon_search import ozon_search
+
+            ozon_query = f"{product.brand} {product.product_subgroup}"
+            ozon_products = ozon_search(query=ozon_query, max_results=5, min_rating=4.0)
+            for op in ozon_products:
+                card = CompetitorCard(
+                    platform="ozon",
+                    product_name=f"{op.brand} {op.name}" if op.brand else op.name,
+                    description=f"Рейтинг {op.rating}/5" if op.rating else "",
+                    price=float(op.price) if op.price else None,
+                    rating=op.rating,
+                    key_features=[f"Цена: {op.price}₽"] if op.price else [],
+                    url=op.url,
+                )
+                all_competitors.append(card)
+        except Exception as e:
+            logger.warning("Ozon search failed: %s", e)
+
+        # If no real results from either, fall back to stub
+        if not all_competitors:
             return self._research_stub(product)
+
+        # Build provenance and benchmark
+        provenance = self._build_provenance(all_competitors)
+        prices = [c.price for c in all_competitors if c.price]
+        avg_price = sum(prices) / len(prices) if prices else None
+
+        all_features = [f for c in all_competitors for f in c.key_features]
+        feature_counts = Counter(all_features)
+        common = [f for f, count in feature_counts.items() if count >= 2]
+
+        wb_count = sum(1 for c in all_competitors if c.platform == "wb")
+        ozon_count = sum(1 for c in all_competitors if c.platform == "ozon")
+
+        benchmark = CompetitorBenchmark(
+            mcm_id=product.mcm_id,
+            competitors=all_competitors,
+            benchmark_summary=(
+                f"WB: {wb_count} товаров, Ozon: {ozon_count} товаров. "
+                f"Средняя цена: {avg_price:.0f}₽" if avg_price
+                else f"WB: {wb_count}, Ozon: {ozon_count}"
+            ),
+            average_price=avg_price,
+            common_features=common,
+        )
+
+        logger.info(
+            "Research complete: WB=%d, Ozon=%d, avg price %.0f₽",
+            wb_count, ozon_count, avg_price or 0,
+        )
+        return benchmark, provenance
 
     # ------------------------------------------------------------------
     # Mode detection

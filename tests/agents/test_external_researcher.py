@@ -136,3 +136,16 @@ class TestExternalResearcherResearch:
 
         assert benchmark.benchmark_summary
         assert len(benchmark.benchmark_summary) > 0
+
+
+class TestExternalResearcherStubFallback:
+    """Tests for stub fallback when no API keys are available."""
+
+    def test_research_uses_stub_without_api_key(self, sample_product, monkeypatch):
+        """Without API keys, research() uses stub mode."""
+        monkeypatch.delenv("NEVEL_API_KEY", raising=False)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        agent = ExternalResearcherAgent()
+        benchmark, prov = agent.research(sample_product)
+        assert benchmark.mcm_id == sample_product.mcm_id
+        assert len(benchmark.competitors) >= 1  # Stub returns at least 1
