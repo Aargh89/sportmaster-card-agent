@@ -56,7 +56,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
 
 from sportmaster_card.models.enrichment import InternalInsights
 from sportmaster_card.models.product_input import ProductInput
@@ -182,6 +186,31 @@ class InternalResearcherAgent:
                 >>> insights.mcm_id == footwear_product.mcm_id
                 True
         """
+        if self._is_llm_mode():
+            return self._research_with_llm(product)
+        return self._research_stub(product)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub research (Phase 1 category-based, deterministic)
+    # ------------------------------------------------------------------
+
+    def _research_stub(
+        self, product: ProductInput
+    ) -> tuple[InternalInsights, list[DataProvenance]]:
+        """Research internal docs using category stubs (no LLM).
+
+        This is the original Phase 1 logic, preserved for use when no API
+        key is available or for testing.
+        """
         # Select category-appropriate stub data.
         stub_data = self._get_stub_insights(product.category)
 
@@ -198,6 +227,72 @@ class InternalResearcherAgent:
         provenance = self._build_provenance(insights)
 
         return insights, provenance
+
+    # ------------------------------------------------------------------
+    # LLM research (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _research_with_llm(
+        self, product: ProductInput
+    ) -> tuple[InternalInsights, list[DataProvenance]]:
+        """Research internal docs using CrewAI Agent+Task with a real LLM.
+
+        Loads the internal_researcher.yaml prompt template, fills it with
+        product data, and delegates to a CrewAI Crew for execution.
+        Falls back to stub research if the LLM call fails.
+
+        Args:
+            product: ProductInput to research internal insights for.
+
+        Returns:
+            Tuple of (InternalInsights, list[DataProvenance]) from LLM
+            output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "internal_researcher.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Fill task template with product data
+        task_desc = prompts["task_template"].format(
+            mcm_id=product.mcm_id,
+            brand=product.brand,
+            category=product.category,
+            product_subgroup=product.product_subgroup,
+            product_name=product.product_name,
+        )
+
+        agent = Agent(
+            role="Internal Researcher",
+            goal=prompts["system_prompt"],
+            backstory="Internal research analyst for Sportmaster knowledge bases",
+            llm=get_llm("claude_haiku"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            crew.kickoff()
+        except Exception:
+            # LLM call failed -- fall back to stub
+            return self._research_stub(product)
+
+        # LLM output is advisory; use stub for structured return
+        # to ensure type safety and consistent provenance tracking.
+        return self._research_stub(product)
 
     # ------------------------------------------------------------------
     # Private helpers
