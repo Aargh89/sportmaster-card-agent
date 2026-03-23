@@ -1,0 +1,10 @@
+=== CuratedProfile ===
+product_name: Nike Air Zoom Pegasus 41
+brand: Nike
+description: Nike Nike Air Zoom Pegasus 41 -- Обувь
+key_features: ['Air Zoom', 'Flywire', 'React']
+technologies: ['Air Zoom', 'Flywire', 'React']
+benefits_data: ['Преимущество: Air Zoom', 'Преимущество: Flywire', 'Преимущество: React', 'Комфорт и поддержка для ваших ног']
+seo_material: ['nike air zoom pegasus 41 купить', 'обувь nike', 'air zoom', 'flywire', 'react']
+composition: {'Верх': 'Текстиль 80%', 'Подошва': 'Резина'}
+provenance entries: 20

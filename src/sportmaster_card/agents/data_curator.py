@@ -206,62 +206,130 @@ class DataCuratorAgent:
     # ------------------------------------------------------------------
 
     def _curate_with_llm(self, profile: EnrichedProductProfile) -> CuratedProfile:
-        """Curate enriched profile using CrewAI Agent+Task with a real LLM.
+        """Curate enriched profile using real LLM for intelligent enrichment.
 
-        Loads the data_curator.yaml prompt template, fills it with
-        enriched profile data, and delegates to a CrewAI Crew for
-        intelligent field resolution and curation.
+        Sends product data to the LLM with a detailed prompt asking it to:
+        1. Write a compelling product description in Russian
+        2. Identify key features and benefits for customers
+        3. Generate SEO keywords and material
+        4. Resolve any data conflicts
+
+        The LLM response is parsed as JSON into CuratedProfile fields.
         Falls back to stub curation if the LLM call fails.
 
         Args:
             profile: EnrichedProductProfile to curate.
 
         Returns:
-            CuratedProfile from LLM-guided curation,
+            CuratedProfile with LLM-enriched data,
             or stub fallback on error.
         """
+        import json
+
         from crewai import Agent, Crew, Task
 
         from sportmaster_card.utils.llm_config import get_llm
 
-        # Load prompt template from YAML config
-        prompt_path = (
-            Path(__file__).parent.parent / "config" / "prompts" / "data_curator.yaml"
-        )
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            prompts = yaml.safe_load(f)
+        base = profile.base_product
+        techs = ", ".join(base.technologies or [])
+        comp = ", ".join(f"{k}: {v}" for k, v in (base.composition or {}).items())
+        competitor_info = ""
+        if profile.competitor_benchmark and profile.competitor_benchmark.competitors:
+            for c in profile.competitor_benchmark.competitors[:3]:
+                competitor_info += f"- {c.platform}: {c.product_name}"
+                if c.key_features:
+                    competitor_info += f" (особенности: {', '.join(c.key_features[:5])})"
+                competitor_info += "\n"
+        internal_info = ""
+        if profile.internal_insights and profile.internal_insights.insights:
+            internal_info = "\n".join(f"- {i}" for i in profile.internal_insights.insights[:5])
+        creative_info = ""
+        if profile.creative_insights:
+            if profile.creative_insights.metaphors:
+                creative_info += "Метафоры: " + ", ".join(profile.creative_insights.metaphors[:3]) + "\n"
+            if profile.creative_insights.emotional_hooks:
+                creative_info += "Эмоциональные крючки: " + ", ".join(profile.creative_insights.emotional_hooks[:3])
 
-        # Fill task template with profile data
-        task_desc = prompts["task_template"].format(
-            enriched_profile=str(profile),
-            disputed_fields="",
-        )
+        # Build a focused enrichment prompt
+        task_desc = f"""Ты — эксперт по товарам Спортмастер. Обогати данные карточки товара.
+
+ВХОДНЫЕ ДАННЫЕ:
+- МЦМ: {base.mcm_id}
+- Бренд: {base.brand}
+- Категория: {base.category}
+- Подгруппа: {base.product_subgroup}
+- Название: {base.product_name}
+- Описание от поставщика: {base.description or 'НЕТ'}
+- Пол: {base.gender or 'не указан'}
+- Сезон: {base.season or 'не указан'}
+- Цвет: {base.color or 'не указан'}
+- Технологии: {techs or 'не указаны'}
+- Состав: {comp or 'не указан'}
+
+ДАННЫЕ КОНКУРЕНТОВ:
+{competitor_info or 'Нет данных'}
+
+ВНУТРЕННИЕ ИНСАЙТЫ:
+{internal_info or 'Нет данных'}
+
+КРЕАТИВНЫЕ ИДЕИ:
+{creative_info or 'Нет данных'}
+
+ЗАДАЧА — верни ТОЛЬКО JSON (без markdown, без ```):
+{{
+  "description": "Подробное описание товара на русском (3-5 предложений). Опиши назначение, ключевые технологии, для кого подходит. Не придумывай характеристики, которых нет во входных данных.",
+  "key_features": ["список 5-8 ключевых особенностей товара для покупателя, на русском"],
+  "benefits_data": ["список 5-8 бенефитов: каждый — короткое предложение о пользе для покупателя"],
+  "seo_material": ["список 8-12 поисковых запросов на русском, по которым покупатели ищут этот товар"]
+}}"""
 
         agent = Agent(
-            role="Data Curator",
-            goal=prompts["system_prompt"],
-            backstory="Senior data curator for Sportmaster product profiles",
-            llm=get_llm("gemini_flash"),
+            role="Product Data Enrichment Expert",
+            goal="Обогати данные карточки товара: описание, ключевые особенности, бенефиты, SEO-запросы",
+            backstory="Ты эксперт по спортивным товарам с 10-летним опытом в e-commerce. Знаешь все технологии Nike, Adidas, Puma. Пишешь на русском.",
+            llm=get_llm("claude_sonnet"),
             verbose=False,
         )
 
         task = Task(
             description=task_desc,
             agent=agent,
-            expected_output=prompts["expected_output"],
+            expected_output="JSON с полями: description, key_features, benefits_data, seo_material",
         )
 
         crew = Crew(agents=[agent], tasks=[task], verbose=False)
 
         try:
-            crew.kickoff()
-        except Exception:
-            # LLM call failed -- fall back to stub
-            return self._curate_stub(profile)
+            result = crew.kickoff()
+            raw = result.raw if hasattr(result, "raw") else str(result)
 
-        # LLM output is advisory; use stub for structured return
-        # to ensure type safety (CuratedProfile model).
-        return self._curate_stub(profile)
+            # Parse JSON from LLM response
+            # Strip markdown code fences if present
+            raw_clean = raw.strip()
+            if raw_clean.startswith("```"):
+                raw_clean = raw_clean.split("\n", 1)[1] if "\n" in raw_clean else raw_clean[3:]
+                if raw_clean.endswith("```"):
+                    raw_clean = raw_clean[:-3]
+                raw_clean = raw_clean.strip()
+
+            enriched = json.loads(raw_clean)
+
+            return CuratedProfile(
+                mcm_id=profile.mcm_id,
+                product_name=base.product_name,
+                brand=base.brand,
+                category=base.category,
+                description=enriched.get("description", base.description or ""),
+                key_features=enriched.get("key_features", base.technologies or []),
+                technologies=base.technologies or [],
+                composition=base.composition or {},
+                benefits_data=enriched.get("benefits_data", []),
+                seo_material=enriched.get("seo_material", []),
+                provenance_log=profile.provenance_log,
+            )
+        except Exception:
+            # LLM call or JSON parse failed -- fall back to stub
+            return self._curate_stub(profile)
 
     # ------------------------------------------------------------------
     # Private helpers
