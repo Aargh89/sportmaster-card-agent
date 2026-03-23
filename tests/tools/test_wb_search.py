@@ -97,6 +97,41 @@ def test_wb_product_url_format():
     assert p.url == "https://www.wildberries.ru/catalog/12345/detail.aspx"
 
 
+def test_wb_get_image_url():
+    """Image URL follows WB CDN format."""
+    from sportmaster_card.tools.wb_search import wb_get_image_url
+    url = wb_get_image_url(123456789, 1)
+    assert "basket-" in url
+    assert "123456789" in url
+    assert url.endswith(".webp")
+
+
+def test_wb_product_with_detail_fields():
+    """WBProduct supports optional detail fields."""
+    from sportmaster_card.tools.wb_search import WBProduct
+    p = WBProduct(
+        product_id=1, name="Test", brand="Test", price=100,
+        original_price=200, rating=4.5, feedbacks=10,
+        url="https://wb.ru/1", description="Full description",
+        characteristics=[{"name": "Материал", "value": "Текстиль"}],
+    )
+    assert p.description == "Full description"
+    assert len(p.characteristics) == 1
+
+
+def test_wb_product_default_detail_fields():
+    """WBProduct detail fields default to empty."""
+    from sportmaster_card.tools.wb_search import WBProduct
+    p = WBProduct(
+        product_id=1, name="Test", brand="Test", price=100,
+        original_price=200, rating=4.5, feedbacks=10,
+        url="https://wb.ru/1",
+    )
+    assert p.description == ""
+    assert p.characteristics == []
+    assert p.image_urls == []
+
+
 def test_wb_search_returns_empty_on_network_error(monkeypatch):
     """wb_search returns empty list on network errors (no crash)."""
     import requests

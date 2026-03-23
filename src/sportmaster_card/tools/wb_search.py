@@ -100,6 +100,10 @@ class WBProduct:
         url: Direct URL to the product card on WB.
         pics: Number of product images.
         sale_percent: Discount percentage.
+        description: Full product description from card detail endpoint.
+        composition: Product composition/materials.
+        characteristics: List of {name, value} characteristic dicts.
+        image_urls: List of direct CDN image URLs.
 
     Example:
         >>> p = WBProduct(product_id=12345, name="Nike Pegasus 41", ...)
@@ -117,6 +121,16 @@ class WBProduct:
     url: str
     pics: int = 0
     sale_percent: int = 0
+    description: str = ""
+    composition: str = ""
+    characteristics: list[dict] = None
+    image_urls: list[str] = None
+
+    def __post_init__(self):
+        if self.characteristics is None:
+            self.characteristics = []
+        if self.image_urls is None:
+            self.image_urls = []
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +291,145 @@ def build_search_queries(
     queries.append(f"{category} {brand} {product_subgroup.split()[0] if product_subgroup else ''}")
 
     return queries
+
+
+# ---------------------------------------------------------------------------
+# Card detail & image URL
+# ---------------------------------------------------------------------------
+
+def wb_get_card_detail(product_id: int, retry_delay: float = 2.0) -> Optional[dict]:
+    """Fetch detailed product card from WB by product ID.
+
+    Uses card.wb.ru API to get full product details including
+    description, composition, characteristics, and photos.
+
+    Endpoint: https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=-1257786&nm={id}
+
+    Args:
+        product_id: WB product article number (nmId).
+        retry_delay: Seconds to wait on rate limit.
+
+    Returns:
+        Dict with product details or None on failure.
+        Keys: description, composition, options (characteristics), pics.
+
+    Example:
+        >>> detail = wb_get_card_detail(123456789)
+        >>> detail['description']
+        'Беговые кроссовки Nike с технологией Air Zoom...'
+    """
+    url = "https://card.wb.ru/cards/v2/detail"
+    params = {
+        "appType": 1,
+        "curr": "rub",
+        "dest": WB_DEFAULT_DEST,
+        "nm": product_id,
+    }
+
+    try:
+        response = requests.get(url, params=params, headers=WB_HEADERS, timeout=WB_TIMEOUT)
+
+        if response.status_code == 429:
+            time.sleep(retry_delay)
+            response = requests.get(url, params=params, headers=WB_HEADERS, timeout=WB_TIMEOUT)
+
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+        products = data.get("data", {}).get("products", [])
+        if not products:
+            return None
+
+        product = products[0]
+        return {
+            "description": product.get("description", ""),
+            "composition": product.get("compositions", ""),
+            "options": product.get("options", []),  # list of {name, value} characteristic dicts
+            "pics": product.get("pics", 0),
+            "colors": [c.get("name", "") for c in product.get("colors", [])],
+        }
+
+    except Exception as e:
+        logger.warning("WB card detail failed for %d: %s", product_id, e)
+        return None
+
+
+def wb_get_image_url(product_id: int, photo_index: int = 1) -> str:
+    """Construct WB product image URL from product ID.
+
+    WB uses a CDN with numbered baskets. The basket number is determined
+    by the product ID range (vol = id // 100000).
+
+    Args:
+        product_id: WB product article number.
+        photo_index: Image index (1-based).
+
+    Returns:
+        Direct URL to the product image on WB CDN.
+    """
+    vol = product_id // 100000
+    part = product_id // 1000
+
+    # Basket routing by vol ranges (from Duff89/wildberries_parser)
+    basket_ranges = [
+        (143, "01"), (287, "02"), (431, "03"), (719, "04"), (1007, "05"),
+        (1061, "06"), (1115, "07"), (1169, "08"), (1313, "09"), (1601, "10"),
+        (1655, "11"), (1919, "12"), (2045, "13"), (2189, "14"), (2405, "15"),
+    ]
+    basket = "16"
+    for threshold, basket_num in basket_ranges:
+        if vol <= threshold:
+            basket = basket_num
+            break
+
+    return f"https://basket-{basket}.wbbasket.ru/vol{vol}/part{part}/{product_id}/images/big/{photo_index}.webp"
+
+
+# ---------------------------------------------------------------------------
+# Enriched search (search + card details)
+# ---------------------------------------------------------------------------
+
+def wb_search_enriched(
+    query: str,
+    max_results: int = 5,
+    min_rating: float = 4.0,
+    fetch_details: bool = True,
+) -> list[WBProduct]:
+    """Search WB and optionally fetch detailed card data for each result.
+
+    Combines wb_search() + wb_get_card_detail() for each product.
+    Adds description, characteristics, and image URLs.
+    Respects rate limiting with delays between detail requests.
+
+    Args:
+        query: Search query in Russian.
+        max_results: Maximum number of products to return.
+        min_rating: Minimum rating filter.
+        fetch_details: Whether to fetch card details for each result.
+
+    Returns:
+        List of WBProduct objects with enriched detail fields.
+    """
+    products = wb_search(query, max_results=max_results, min_rating=min_rating)
+
+    if not fetch_details or not products:
+        return products
+
+    for i, p in enumerate(products):
+        if i > 0:
+            time.sleep(WB_REQUEST_DELAY)  # Rate limit between detail requests
+
+        detail = wb_get_card_detail(p.product_id)
+        if detail:
+            p.description = detail.get("description", "")
+            p.composition = detail.get("composition", "")
+            p.characteristics = detail.get("options", [])
+            # Build image URLs
+            pics_count = min(detail.get("pics", 0), 5)  # Max 5 images
+            p.image_urls = [wb_get_image_url(p.product_id, i + 1) for i in range(pics_count)]
+
+    return products
 
 
 # ---------------------------------------------------------------------------
