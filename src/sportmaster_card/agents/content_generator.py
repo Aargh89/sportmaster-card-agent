@@ -45,6 +45,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -52,6 +53,17 @@ import yaml
 
 from sportmaster_card.models.content import Benefit, PlatformContent
 from sportmaster_card.models.product_input import ProductInput
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences from LLM output."""
+    text = text.strip()
+    if text.startswith('```'):
+        text = text.split('\n', 1)[1] if '\n' in text else text[3:]
+        if text.endswith('```'):
+            text = text[:-3]
+        text = text.strip()
+    return text
 
 
 class ContentGeneratorAgent:
@@ -300,19 +312,39 @@ class ContentGeneratorAgent:
 
         try:
             result = crew.kickoff()
+            raw = result.raw if hasattr(result, 'raw') else str(result)
+
+            # Strip markdown code fences
+            raw_clean = _strip_code_fences(raw)
+
+            parsed = json.loads(raw_clean)
+
+            # Map JSON to PlatformContent
+            benefits = []
+            for b in parsed.get('benefits', []):
+                if isinstance(b, dict):
+                    benefits.append(Benefit(
+                        title=b.get('title', ''),
+                        description=b.get('description', ''),
+                    ))
+                elif isinstance(b, str):
+                    benefits.append(Benefit(title=b[:50], description=b))
+
+            return PlatformContent(
+                mcm_id=product.mcm_id,
+                platform_id=platform_id,
+                product_name=parsed.get('product_name', product.product_name),
+                description=parsed.get('description', ''),
+                benefits=benefits or [Benefit(title='Feature', description='Product feature')],
+                seo_title=parsed.get('seo_title', ''),
+                seo_meta_description=parsed.get('seo_meta_description', ''),
+                seo_keywords=parsed.get('seo_keywords', []),
+            )
         except Exception:
-            # LLM call failed -- fall back to stub
+            # LLM call failed or output unparseable -- fall back to stub
             return self._generate_stub(
                 product, platform_id, max_description_length, max_title_length,
             )
-
-        if hasattr(result, "pydantic") and result.pydantic:
-            return result.pydantic
-
-        # Fallback: could not parse LLM output into PlatformContent
-        return self._generate_stub(
-            product, platform_id, max_description_length, max_title_length,
-        )
 
     # ------------------------------------------------------------------
     # Private helper methods -- template-based generation (Phase 1).
