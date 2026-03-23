@@ -44,6 +44,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+import yaml
+
 from sportmaster_card.models.content import FactCheckReport, PlatformContent
 from sportmaster_card.models.enrichment import CuratedProfile
 
@@ -95,6 +100,10 @@ class FactCheckerAgent:
         Runs all fact-check verifications and aggregates results.
         Content is considered accurate only if ALL checks pass.
 
+        Uses real LLM (via CrewAI + OpenRouter) when OPENROUTER_API_KEY
+        is set in the environment. Falls back to deterministic rule-based
+        verification otherwise.
+
         Args:
             content: Generated platform content to verify.
             profile: Source-of-truth CuratedProfile containing verified
@@ -103,6 +112,33 @@ class FactCheckerAgent:
         Returns:
             FactCheckReport with is_accurate verdict, inaccuracies
             list, and unverifiable_claims list.
+        """
+        if self._is_llm_mode():
+            return self._check_with_llm(content, profile)
+        return self._check_stub(content, profile)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub checking (Phase 1 rule-based, no LLM)
+    # ------------------------------------------------------------------
+
+    def _check_stub(
+        self,
+        content: PlatformContent,
+        profile: CuratedProfile,
+    ) -> FactCheckReport:
+        """Verify using deterministic string-matching (no LLM).
+
+        This is the original Phase 1 verification logic, preserved for
+        use when no API key is available or for testing.
         """
         inaccuracies: list[str] = []
         unverifiable: list[str] = []
@@ -124,6 +160,88 @@ class FactCheckerAgent:
             inaccuracies=inaccuracies,
             unverifiable_claims=unverifiable,
         )
+
+    # ------------------------------------------------------------------
+    # LLM checking (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _check_with_llm(
+        self,
+        content: PlatformContent,
+        profile: CuratedProfile,
+    ) -> FactCheckReport:
+        """Verify using CrewAI Agent+Task with a real LLM.
+
+        Loads the fact_checker.yaml prompt template, fills it with
+        content and profile data, and delegates to a CrewAI Crew for
+        execution. Falls back to stub checking if the LLM call fails
+        or returns unparseable output.
+
+        Args:
+            content: Generated platform content to verify.
+            profile: Source-of-truth CuratedProfile.
+
+        Returns:
+            FactCheckReport from LLM output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "fact_checker.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Format benefits for the prompt
+        benefits_text = "; ".join(
+            f"{b.title}: {b.description}" for b in content.benefits
+        )
+
+        # Fill task template with content and profile data
+        task_desc = prompts["task_template"].format(
+            platform_id=content.platform_id,
+            product_name=content.product_name,
+            description=content.description,
+            benefits=benefits_text,
+            brand=profile.brand,
+            category=profile.category,
+            verified_technologies=", ".join(profile.technologies),
+            verified_composition=str(profile.composition),
+            verified_features=", ".join(profile.technologies),
+            country_of_origin="",
+            size_info="",
+        )
+
+        agent = Agent(
+            role="Fact Checker",
+            goal=prompts["system_prompt"],
+            backstory="Fact-checking specialist for Sportmaster product content",
+            llm=get_llm("gemini_flash"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+            output_pydantic=FactCheckReport,
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            result = crew.kickoff()
+        except Exception:
+            return self._check_stub(content, profile)
+
+        if hasattr(result, "pydantic") and result.pydantic:
+            return result.pydantic
+
+        # Fallback: could not parse LLM output into FactCheckReport
+        return self._check_stub(content, profile)
 
     # ------------------------------------------------------------------
     # Private helpers -- rule-based fact verification (Phase 1)
