@@ -1260,3 +1260,70 @@ class FactCheckReport(BaseModel):
             [],
         ],
     )
+
+
+# ---------------------------------------------------------------------------
+# PlatformContentSet — aggregated content across all target platforms
+# ---------------------------------------------------------------------------
+
+
+class PlatformContentSet(BaseModel):
+    """Aggregated content across all target platforms for one MCM.
+
+    This is the MAIN OUTPUT of the parallel generation pipeline.
+    Contains one PlatformContent per target platform, all generated
+    from the same CuratedProfile but with different PlatformProfile configs.
+
+    Architecture (v0.3 -- parallel generation from source)::
+
+        +------------------+
+        |  CuratedProfile  | (single source of truth)
+        +--------+---------+
+                 | fan-out
+        +--------+--------+----------+
+        v        v        v          v
+       SM       WB      Ozon     Lamoda  ...
+        |        |        |          |
+        v        v        v          v
+      PlatformContent per platform
+        |        |        |          |
+        +--------+--------+----------+
+                 v
+          PlatformContentSet
+
+    Attributes:
+        mcm_id: Master catalog model identifier. Links back to the source
+            product across all platforms.
+        contents: Mapping of platform_id to PlatformContent. Each entry
+            holds the fully generated content for that platform.
+        quality_scores: Mapping of platform_id to QualityScore. Populated
+            after the quality evaluation step runs for each platform.
+        target_platforms: Ordered list of platform_ids that should be
+            generated. Defines the scope of the fan-out.
+        all_passed_quality: Convenience flag indicating whether every
+            platform in quality_scores meets the passing threshold.
+    """
+
+    mcm_id: str = Field(
+        ...,
+        description="Master catalog model ID for the product.",
+    )
+    contents: dict[str, PlatformContent] = Field(
+        default={},
+        description="platform_id -> PlatformContent mapping.",
+    )
+    quality_scores: dict[str, QualityScore] = Field(
+        default={},
+        description="platform_id -> QualityScore mapping.",
+    )
+    target_platforms: list[str] = Field(
+        default=[],
+        description="Ordered list of platform_ids to generate content for.",
+    )
+    all_passed_quality: bool = Field(
+        default=False,
+        description=(
+            "True when every platform in quality_scores meets the "
+            "passing threshold (>= 0.7)."
+        ),
+    )

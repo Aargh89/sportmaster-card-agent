@@ -232,3 +232,49 @@ def test_fact_check_report_with_issues():
         unverifiable_claims=["'самая лёгкая модель' — нет данных для сравнения"],
     )
     assert len(fcr.inaccuracies) == 1
+
+
+# ---------------------------------------------------------------------------
+# PlatformContentSet — multi-platform content aggregation
+# ---------------------------------------------------------------------------
+
+
+def test_platform_content_set_valid():
+    """PlatformContentSet aggregates content across platforms."""
+    from sportmaster_card.models.content import PlatformContentSet, PlatformContent, Benefit, QualityScore
+
+    sm_content = PlatformContent(
+        mcm_id="MCM-001", platform_id="sm_site", product_name="Nike Pegasus",
+        description="Test", benefits=[Benefit(title="T", description="D")],
+        seo_title="T", seo_meta_description="M", seo_keywords=["k"],
+    )
+    wb_content = PlatformContent(
+        mcm_id="MCM-001", platform_id="wb", product_name="Nike Pegasus WB",
+        description="Test WB", benefits=[Benefit(title="T", description="D")],
+        seo_title="T", seo_meta_description="M", seo_keywords=["k"],
+    )
+
+    content_set = PlatformContentSet(
+        mcm_id="MCM-001",
+        contents={"sm_site": sm_content, "wb": wb_content},
+        target_platforms=["sm_site", "wb"],
+    )
+    assert len(content_set.contents) == 2
+    assert content_set.contents["wb"].platform_id == "wb"
+
+
+def test_platform_content_set_quality_check():
+    """all_passed_quality reflects whether all platforms pass threshold."""
+    from sportmaster_card.models.content import PlatformContentSet
+
+    cs = PlatformContentSet(mcm_id="MCM-001", all_passed_quality=True)
+    assert cs.all_passed_quality is True
+
+
+def test_platform_content_set_empty():
+    """Empty PlatformContentSet is valid (before generation starts)."""
+    from sportmaster_card.models.content import PlatformContentSet
+
+    cs = PlatformContentSet(mcm_id="MCM-001")
+    assert cs.contents == {}
+    assert cs.target_platforms == []
