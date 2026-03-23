@@ -42,6 +42,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -49,6 +50,17 @@ import yaml
 
 from sportmaster_card.models.content import SEOProfile
 from sportmaster_card.models.product_input import ProductInput
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences from LLM output."""
+    text = text.strip()
+    if text.startswith('```'):
+        text = text.split('\n', 1)[1] if '\n' in text else text[3:]
+        if text.endswith('```'):
+            text = text[:-3]
+        text = text.strip()
+    return text
 
 
 class SEOAnalystAgent:
@@ -222,14 +234,23 @@ class SEOAnalystAgent:
 
         try:
             result = crew.kickoff()
+            raw = result.raw if hasattr(result, 'raw') else str(result)
+
+            # Strip markdown code fences
+            raw_clean = _strip_code_fences(raw)
+
+            parsed = json.loads(raw_clean)
+
+            return SEOProfile(
+                mcm_id=product.mcm_id,
+                platform_id=platform_id,
+                primary_keywords=parsed.get('primary_keywords', []),
+                secondary_keywords=parsed.get('secondary_keywords', []),
+                title_recommendation=parsed.get('title_recommendation', ''),
+                meta_description_recommendation=parsed.get('meta_description_recommendation', ''),
+            )
         except Exception:
             return self._analyze_stub(product, platform_id)
-
-        if hasattr(result, "pydantic") and result.pydantic:
-            return result.pydantic
-
-        # Fallback: could not parse LLM output into SEOProfile
-        return self._analyze_stub(product, platform_id)
 
     # ------------------------------------------------------------------
     # Private helpers -- deterministic keyword extraction (Phase 1)
