@@ -1,0 +1,20 @@
+platform_id: sm_site
+platform_type: "1P"
+platform_name: "Sportmaster Website"
+text_requirements:
+  max_title_length: 150
+  max_description_length: 3000
+  required_sections:
+    - description
+    - benefits
+    - technologies
+    - composition
+  forbidden_words: []
+  naming_rules: "Бренд + Тип + Модель + Характеристика"
+  seo_keywords_source: "internal_seo_team"
+  seo_rules:
+    - "Ключевые слова в первом абзаце"
+    - "Title содержит бренд и категорию"
+  tone_of_voice: "professional"
+  benefits_format: "title + 1-2 sentence description"
+  html_allowed: true
