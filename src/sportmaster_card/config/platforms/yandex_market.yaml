@@ -1,0 +1,20 @@
+platform_id: yandex_market
+platform_type: "VMP"
+platform_name: "Яндекс.Маркет"
+text_requirements:
+  max_title_length: 120
+  max_description_length: 3000
+  required_sections:
+    - description
+    - benefits
+    - technologies
+  forbidden_words:
+    - "Спортмастер"
+  naming_rules: "Тип товара + Бренд + Модель"
+  seo_keywords_source: "yandex_wordstat"
+  seo_rules:
+    - "SEO-title оптимизирован под Яндекс поиск"
+    - "Описание содержит ответы на частые вопросы"
+  tone_of_voice: "informative"
+  benefits_format: "title_description"
+  html_allowed: true

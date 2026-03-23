@@ -148,3 +148,27 @@ def test_seo_rules():
     assert len(profile.text_requirements.seo_rules) == 2
     assert "Ключевые слова в первом абзаце" in profile.text_requirements.seo_rules
     assert "Title содержит бренд и категорию" in profile.text_requirements.seo_rules
+
+
+# ---------------------------------------------------------------------------
+# 6. Load all platform YAML configs
+# ---------------------------------------------------------------------------
+
+def test_load_all_platform_configs():
+    """All platform YAML configs load successfully."""
+    import os
+
+    from sportmaster_card.models.platform_profile import PlatformProfile
+
+    config_dir = os.path.join(
+        os.path.dirname(__file__), "..", "..",
+        "src", "sportmaster_card", "config", "platforms",
+    )
+    yaml_files = [f for f in os.listdir(config_dir) if f.endswith(".yaml")]
+    assert len(yaml_files) >= 5  # sm_site + 4 VMP
+
+    for yf in yaml_files:
+        path = os.path.join(config_dir, yf)
+        profile = PlatformProfile.from_yaml(path)
+        assert profile.platform_id != ""
+        assert profile.platform_name != ""

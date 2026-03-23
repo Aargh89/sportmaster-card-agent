@@ -1,0 +1,23 @@
+platform_id: lamoda
+platform_type: "VMP"
+platform_name: "Lamoda"
+text_requirements:
+  max_title_length: 120
+  max_description_length: 4000
+  required_sections:
+    - description
+    - benefits
+    - composition
+    - care_instructions
+  forbidden_words:
+    - "Спортмастер"
+    - "дёшево"
+    - "распродажа"
+  naming_rules: "Бренд + Модель + Тип"
+  seo_keywords_source: "lamoda_search"
+  seo_rules:
+    - "Акцент на стиль и модные тренды"
+    - "Описание должно быть lifestyle-ориентированным"
+  tone_of_voice: "lifestyle_fashion"
+  benefits_format: "narrative"
+  html_allowed: false

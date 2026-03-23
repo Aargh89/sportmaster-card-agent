@@ -1,0 +1,23 @@
+platform_id: ozon
+platform_type: "VMP"
+platform_name: "Ozon"
+text_requirements:
+  max_title_length: 150
+  max_description_length: 6000
+  required_sections:
+    - description
+    - benefits
+    - technologies
+    - composition
+  forbidden_words:
+    - "Спортмастер"
+    - "наш магазин"
+  naming_rules: "Тип товара + Бренд + Модель + Цвет/Размер"
+  seo_keywords_source: "ozon_analytics"
+  seo_rules:
+    - "Title должен содержать основной поисковый запрос"
+    - "Описание начинается с ключевого преимущества"
+    - "Rich-контент предпочтителен"
+  tone_of_voice: "professional_detailed"
+  benefits_format: "title_description"
+  html_allowed: true

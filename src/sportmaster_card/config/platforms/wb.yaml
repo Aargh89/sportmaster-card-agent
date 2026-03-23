@@ -1,0 +1,22 @@
+platform_id: wb
+platform_type: "VMP"
+platform_name: "Wildberries"
+text_requirements:
+  max_title_length: 100
+  max_description_length: 5000
+  required_sections:
+    - description
+    - benefits
+    - composition
+  forbidden_words:
+    - "Спортмастер"
+    - "купить у нас"
+  naming_rules: "Бренд + Тип товара + Модель + Ключевая характеристика"
+  seo_keywords_source: "wb_search_trends"
+  seo_rules:
+    - "Ключевые слова в первых 2 предложениях"
+    - "Не более 3 повторений одного ключа"
+    - "Ключи не через запятую"
+  tone_of_voice: "informative_casual"
+  benefits_format: "bullet_points"
+  html_allowed: false
