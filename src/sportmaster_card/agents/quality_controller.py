@@ -58,6 +58,11 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+import yaml
+
 from sportmaster_card.models.content import (
     ComplianceReport,
     FactCheckReport,
@@ -100,6 +105,10 @@ class QualityControllerAgent:
         the compliance/fact-check reports, then calculates a weighted
         overall score.  Issues are collected from all failing dimensions.
 
+        Uses real LLM (via CrewAI + OpenRouter) when OPENROUTER_API_KEY
+        is set in the environment. Falls back to deterministic heuristic
+        scoring otherwise.
+
         Args:
             content: Generated platform content to evaluate.
             compliance: Brand compliance check results from
@@ -110,6 +119,34 @@ class QualityControllerAgent:
         Returns:
             QualityScore with overall and per-dimension scores,
             plus an issues list for feedback on failing dimensions.
+        """
+        if self._is_llm_mode():
+            return self._evaluate_with_llm(content, compliance, fact_check)
+        return self._evaluate_stub(content, compliance, fact_check)
+
+    # ------------------------------------------------------------------
+    # Mode detection
+    # ------------------------------------------------------------------
+
+    def _is_llm_mode(self) -> bool:
+        """Check if real LLM is available via OPENROUTER_API_KEY."""
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        return bool(key.strip())
+
+    # ------------------------------------------------------------------
+    # Stub evaluation (Phase 1 heuristic, no LLM)
+    # ------------------------------------------------------------------
+
+    def _evaluate_stub(
+        self,
+        content: PlatformContent,
+        compliance: ComplianceReport,
+        fact_check: FactCheckReport,
+    ) -> QualityScore:
+        """Evaluate using deterministic heuristic scoring (no LLM).
+
+        This is the original Phase 1 evaluation logic, preserved for use
+        when no API key is available or for testing.
         """
         # Score each dimension independently
         readability = self._score_readability(content)
@@ -140,6 +177,96 @@ class QualityControllerAgent:
             uniqueness_score=round(uniqueness, 3),
             issues=issues,
         )
+
+    # ------------------------------------------------------------------
+    # LLM evaluation (Phase 2 -- CrewAI + OpenRouter)
+    # ------------------------------------------------------------------
+
+    def _evaluate_with_llm(
+        self,
+        content: PlatformContent,
+        compliance: ComplianceReport,
+        fact_check: FactCheckReport,
+    ) -> QualityScore:
+        """Evaluate using CrewAI Agent+Task with a real LLM.
+
+        Loads the quality_controller.yaml prompt template, fills it with
+        content and report data, and delegates to a CrewAI Crew for
+        execution. Falls back to stub evaluation if the LLM call fails
+        or returns unparseable output.
+
+        Args:
+            content: Generated platform content to evaluate.
+            compliance: Brand compliance check results.
+            fact_check: Factual accuracy check results.
+
+        Returns:
+            QualityScore from LLM output, or stub fallback on error.
+        """
+        from crewai import Agent, Crew, Task
+
+        from sportmaster_card.utils.llm_config import get_llm
+
+        # Load prompt template from YAML config
+        prompt_path = (
+            Path(__file__).parent.parent / "config" / "prompts" / "quality_controller.yaml"
+        )
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = yaml.safe_load(f)
+
+        # Format benefits and reports for the prompt
+        benefits_text = "; ".join(
+            f"{b.title}: {b.description}" for b in content.benefits
+        )
+        compliance_text = (
+            f"is_compliant={compliance.is_compliant}, "
+            f"violations={compliance.violations}"
+        )
+        fact_check_text = (
+            f"is_accurate={fact_check.is_accurate}, "
+            f"inaccuracies={fact_check.inaccuracies}"
+        )
+
+        # Fill task template with content and report data
+        task_desc = prompts["task_template"].format(
+            platform_id=content.platform_id,
+            product_name=content.product_name,
+            description=content.description,
+            benefits=benefits_text,
+            seo_title=content.seo_title,
+            seo_meta_description=content.seo_meta_description,
+            seo_keywords=", ".join(content.seo_keywords),
+            compliance_report=compliance_text,
+            fact_check_report=fact_check_text,
+        )
+
+        agent = Agent(
+            role="Quality Controller",
+            goal=prompts["system_prompt"],
+            backstory="Final quality gate for Sportmaster content pipeline",
+            llm=get_llm("claude_sonnet"),
+            verbose=False,
+        )
+
+        task = Task(
+            description=task_desc,
+            agent=agent,
+            expected_output=prompts["expected_output"],
+            output_pydantic=QualityScore,
+        )
+
+        crew = Crew(agents=[agent], tasks=[task], verbose=False)
+
+        try:
+            result = crew.kickoff()
+        except Exception:
+            return self._evaluate_stub(content, compliance, fact_check)
+
+        if hasattr(result, "pydantic") and result.pydantic:
+            return result.pydantic
+
+        # Fallback: could not parse LLM output into QualityScore
+        return self._evaluate_stub(content, compliance, fact_check)
 
     # ------------------------------------------------------------------
     # Private scoring methods -- heuristic-based (Phase 1)
