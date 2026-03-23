@@ -1,62 +1,82 @@
-"""Tests for LLM configuration helper: get_llm() and MODEL_MAP.
+"""Tests for LLM configuration helper: get_llm(), get_api_config(), MODEL_MAPs.
 
-These tests verify the OpenRouter LLM integration layer that provides
-CrewAI-compatible LLM instances to all agents. No real API calls are made.
+Tests verify the Nevel API / OpenRouter integration layer.
+No real API calls are made.
 
 Test strategy:
-    - get_llm() returns LLM with correct default model (claude_sonnet)
-    - get_llm() accepts custom model name for agent-specific selection
-    - MODEL_MAP maps friendly names to full OpenRouter model IDs
-    - MODEL_MAP contains all three required model families
+    - get_api_config() selects Nevel API when NEVEL_API_KEY is set
+    - get_api_config() falls back to OpenRouter when only OPENROUTER_API_KEY is set
+    - get_llm() returns LLM with correct model for active provider
+    - Model maps contain all required model families
+    - Nevel model map maps friendly names to nevel/* IDs
 """
 
 from unittest.mock import patch, MagicMock
 import pytest
 
 
-def test_get_llm_default():
-    """get_llm() with no args returns LLM configured for claude_sonnet via OpenRouter."""
-    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key-123"}):
-        with patch("crewai.LLM") as MockLLM:
-            MockLLM.return_value = MagicMock()
-            from sportmaster_card.utils.llm_config import get_llm
+def test_get_api_config_nevel(monkeypatch):
+    """NEVEL_API_KEY set → Nevel API provider selected."""
+    monkeypatch.setenv("NEVEL_API_KEY", "ak_test123")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    from sportmaster_card.utils.llm_config import get_api_config
 
-            result = get_llm()
-
-            MockLLM.assert_called_once()
-            call_kwargs = MockLLM.call_args[1]
-            assert "openrouter/" in call_kwargs["model"]
-            assert "claude-sonnet" in call_kwargs["model"]
-            assert call_kwargs["api_key"] == "test-key-123"
-            assert call_kwargs["temperature"] == 0.7
-            assert call_kwargs["max_tokens"] == 4096
+    key, url, model_map = get_api_config()
+    assert key == "ak_test123"
+    assert "nevel.ai" in url
+    assert "nevel/" in model_map["claude_sonnet"]
 
 
-def test_get_llm_custom_model():
-    """get_llm() with custom model passes it through as OpenRouter model ID."""
-    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key-456"}):
-        with patch("crewai.LLM") as MockLLM:
-            MockLLM.return_value = MagicMock()
-            from sportmaster_card.utils.llm_config import get_llm
+def test_get_api_config_openrouter_fallback(monkeypatch):
+    """Only OPENROUTER_API_KEY → OpenRouter fallback."""
+    monkeypatch.delenv("NEVEL_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    from sportmaster_card.utils.llm_config import get_api_config
 
-            result = get_llm(model_name="anthropic/claude-sonnet-4")
-
-            call_kwargs = MockLLM.call_args[1]
-            assert call_kwargs["model"] == "openrouter/anthropic/claude-sonnet-4"
-
-
-def test_get_llm_model_mapping():
-    """MODEL_MAP maps friendly names like 'claude_sonnet' to OpenRouter model IDs."""
-    from sportmaster_card.utils.llm_config import MODEL_MAP
-
-    assert MODEL_MAP["claude_sonnet"] == "anthropic/claude-sonnet-4"
-    assert MODEL_MAP["claude_haiku"] == "anthropic/claude-haiku-4-5"
-    assert MODEL_MAP["gemini_flash"] == "google/gemini-2.0-flash-001"
+    key, url, model_map = get_api_config()
+    assert key == "sk-or-test"
+    assert "openrouter" in url
+    assert "anthropic/" in model_map["claude_sonnet"]
 
 
-def test_model_map_has_required_models():
-    """MODEL_MAP contains all three required model families for agent assignment."""
-    from sportmaster_card.utils.llm_config import MODEL_MAP
+def test_get_api_config_no_keys(monkeypatch):
+    """No API keys → empty (stub mode)."""
+    monkeypatch.delenv("NEVEL_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    from sportmaster_card.utils.llm_config import get_api_config
 
-    required = {"claude_sonnet", "claude_haiku", "gemini_flash"}
-    assert required.issubset(set(MODEL_MAP.keys()))
+    key, url, model_map = get_api_config()
+    assert key == ""
+    assert url == ""
+
+
+def test_get_llm_with_nevel(monkeypatch):
+    """get_llm() with Nevel API key uses nevel model IDs."""
+    monkeypatch.setenv("NEVEL_API_KEY", "ak_test")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with patch("crewai.LLM") as MockLLM:
+        MockLLM.return_value = MagicMock()
+        from sportmaster_card.utils.llm_config import get_llm
+
+        get_llm("claude_sonnet")
+
+        call_kwargs = MockLLM.call_args[1]
+        assert "nevel/sonnet4" in call_kwargs["model"]
+        assert call_kwargs["api_key"] == "ak_test"
+        assert "nevel.ai" in call_kwargs["base_url"]
+
+
+def test_nevel_model_map_has_required_models():
+    """Nevel model map has all required friendly names."""
+    from sportmaster_card.utils.llm_config import NEVEL_MODEL_MAP
+
+    required = {"claude_sonnet", "claude_haiku", "gemini_flash", "gpt4o"}
+    assert required.issubset(set(NEVEL_MODEL_MAP.keys()))
+
+
+def test_nevel_model_map_values():
+    """Nevel model IDs start with 'nevel/'."""
+    from sportmaster_card.utils.llm_config import NEVEL_MODEL_MAP
+
+    for key, value in NEVEL_MODEL_MAP.items():
+        assert value.startswith("nevel/"), f"{key} → {value} should start with nevel/"

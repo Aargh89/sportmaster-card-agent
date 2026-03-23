@@ -129,9 +129,12 @@ class QualityControllerAgent:
     # ------------------------------------------------------------------
 
     def _is_llm_mode(self) -> bool:
-        """Check if real LLM is available via OPENROUTER_API_KEY."""
-        key = os.environ.get("OPENROUTER_API_KEY", "")
-        return bool(key.strip())
+        """Check if real LLM is available (Nevel API or OpenRouter)."""
+        nevel_key = os.environ.get("NEVEL_API_KEY", "").strip()
+        if nevel_key:
+            return True
+        openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        return bool(openrouter_key)
 
     # ------------------------------------------------------------------
     # Stub evaluation (Phase 1 heuristic, no LLM)

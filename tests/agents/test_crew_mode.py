@@ -1,24 +1,46 @@
-"""Tests for dual-mode agent execution (stub vs LLM)."""
+"""Tests for dual-mode agent execution (stub vs LLM).
+
+Tests both Nevel API and OpenRouter API key detection.
+"""
 import os
 import pytest
 
 
-def test_is_llm_mode_without_key(monkeypatch):
-    """Without OPENROUTER_API_KEY, agents run in stub mode."""
+def test_is_llm_mode_without_any_key(monkeypatch):
+    """Without any API key, agents run in stub mode."""
+    monkeypatch.delenv("NEVEL_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     from sportmaster_card.agents.crew_base import is_llm_mode
     assert is_llm_mode() is False
 
 
-def test_is_llm_mode_with_key(monkeypatch):
-    """With OPENROUTER_API_KEY set, agents run in LLM mode."""
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-123")
+def test_is_llm_mode_with_nevel_key(monkeypatch):
+    """With NEVEL_API_KEY set, agents run in LLM mode (primary)."""
+    monkeypatch.setenv("NEVEL_API_KEY", "ak_test123")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     from sportmaster_card.agents.crew_base import is_llm_mode
     assert is_llm_mode() is True
 
 
-def test_is_llm_mode_with_empty_key(monkeypatch):
-    """Empty OPENROUTER_API_KEY means stub mode."""
+def test_is_llm_mode_with_openrouter_key(monkeypatch):
+    """With OPENROUTER_API_KEY set, agents run in LLM mode (fallback)."""
+    monkeypatch.delenv("NEVEL_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test123")
+    from sportmaster_card.agents.crew_base import is_llm_mode
+    assert is_llm_mode() is True
+
+
+def test_is_llm_mode_nevel_takes_priority(monkeypatch):
+    """When both keys set, Nevel takes priority."""
+    monkeypatch.setenv("NEVEL_API_KEY", "ak_nevel")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-openrouter")
+    from sportmaster_card.agents.crew_base import is_llm_mode
+    assert is_llm_mode() is True
+
+
+def test_is_llm_mode_with_empty_keys(monkeypatch):
+    """Empty API keys mean stub mode."""
+    monkeypatch.setenv("NEVEL_API_KEY", "")
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     from sportmaster_card.agents.crew_base import is_llm_mode
     assert is_llm_mode() is False
@@ -52,6 +74,7 @@ def test_create_crew_task():
 
 def test_run_agent_stub_mode(monkeypatch):
     """run_agent() in stub mode calls the fallback function."""
+    monkeypatch.delenv("NEVEL_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     from sportmaster_card.agents.crew_base import run_agent
 

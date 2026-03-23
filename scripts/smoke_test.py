@@ -1,8 +1,8 @@
-"""Live smoke test -- runs full pipeline with real LLM via OpenRouter.
+"""Live smoke test -- runs full pipeline with real LLM via Nevel API.
 
 Usage::
 
-    OPENROUTER_API_KEY=your-key python scripts/smoke_test.py
+    NEVEL_API_KEY=ak_xxx python scripts/smoke_test.py
 
 This script:
     1. Creates a sample Nike Pegasus product.
@@ -10,8 +10,8 @@ This script:
     3. Prints all outputs at each stage.
     4. Reports total elapsed time.
 
-Requires: OPENROUTER_API_KEY environment variable.
-Without it, agents will fall back to stub/rule-based mode.
+Requires: NEVEL_API_KEY (primary) or OPENROUTER_API_KEY (fallback).
+Without either, agents will fall back to stub/rule-based mode.
 """
 
 import os
@@ -21,9 +21,9 @@ import time
 
 def main() -> None:
     """Run the full pipeline smoke test and print results."""
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        print("ERROR: Set OPENROUTER_API_KEY environment variable")
-        print("Usage: OPENROUTER_API_KEY=sk-xxx python scripts/smoke_test.py")
+    if not os.environ.get("NEVEL_API_KEY") and not os.environ.get("OPENROUTER_API_KEY"):
+        print("ERROR: Set NEVEL_API_KEY or OPENROUTER_API_KEY environment variable")
+        print("Usage: NEVEL_API_KEY=ak_xxx python scripts/smoke_test.py")
         sys.exit(1)
 
     from sportmaster_card.flows.pilot_flow import PilotFlow
@@ -53,7 +53,8 @@ def main() -> None:
     print("=" * 60)
     print(f"Product: {product.brand} {product.product_name}")
     print(f"MCM: {product.mcm_id}")
-    print(f"LLM Mode: {'ON' if os.environ.get('OPENROUTER_API_KEY') else 'OFF (stub)'}")
+    api_provider = "Nevel API" if os.environ.get("NEVEL_API_KEY") else "OpenRouter" if os.environ.get("OPENROUTER_API_KEY") else "STUB"
+    print(f"LLM Mode: {api_provider}")
     print("=" * 60)
 
     start_time = time.time()

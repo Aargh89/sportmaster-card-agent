@@ -31,9 +31,16 @@ from crewai import Agent, Task, Crew
 
 
 def is_llm_mode() -> bool:
-    """Check if LLM mode is active (OPENROUTER_API_KEY is set and non-empty)."""
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    return bool(key.strip())
+    """Check if LLM mode is active (NEVEL_API_KEY or OPENROUTER_API_KEY is set).
+
+    Priority: NEVEL_API_KEY first, then OPENROUTER_API_KEY.
+    Returns True if any valid API key is found.
+    """
+    nevel_key = os.environ.get("NEVEL_API_KEY", "").strip()
+    if nevel_key:
+        return True
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    return bool(openrouter_key)
 
 
 def create_crew_agent(
