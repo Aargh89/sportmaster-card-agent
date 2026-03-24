@@ -187,39 +187,30 @@ class ExternalResearcherAgent:
 
         all_competitors: list[CompetitorCard] = []
 
-        # 1. Search Wildberries
+        # 1. Search Wildberries via Crawl4AI (headless browser)
         try:
-            from sportmaster_card.tools.wb_search import wb_search, build_search_queries
+            from sportmaster_card.tools.crawl_search import crawl_wb_search
 
-            queries = build_search_queries(
-                brand=product.brand,
-                product_name=product.product_name,
-                category=product.category,
-                product_subgroup=product.product_subgroup,
-                technologies=product.technologies,
-            )
-            for query in queries:
-                wb_products = wb_search(query=query, max_results=5, min_rating=4.0)
-                if wb_products:
-                    for wp in wb_products:
-                        card = CompetitorCard(
-                            platform="wb",
-                            product_name=f"{wp.brand} {wp.name}",
-                            description=wp.description or f"Рейтинг {wp.rating}/5, {wp.feedbacks} отзывов",
-                            price=float(wp.price),
-                            rating=wp.rating,
-                            key_features=[
-                                f"Цена: {wp.price}₽",
-                                f"Рейтинг: {wp.rating}",
-                                f"Отзывы: {wp.feedbacks}",
-                            ],
-                            url=wp.url,
-                        )
-                        all_competitors.append(card)
-                    break
-                time.sleep(2)
+            wb_query = f"{product.brand} {product.product_name}"
+            crawled = crawl_wb_search(wb_query, max_results=5)
+
+            for cp in crawled:
+                card = CompetitorCard(
+                    platform="wb",
+                    product_name=f"{cp.brand} {cp.name}" if cp.brand else cp.name,
+                    description=f"Цена: {cp.price}₽, скидка {cp.discount}" if cp.discount else f"Цена: {cp.price}₽",
+                    price=float(cp.price) if cp.price else None,
+                    rating=0.0,
+                    key_features=[
+                        f"Цена: {cp.price}₽",
+                        f"Старая цена: {cp.old_price}₽" if cp.old_price else "",
+                        f"Скидка: {cp.discount}" if cp.discount else "",
+                    ],
+                    url=cp.url,
+                )
+                all_competitors.append(card)
         except Exception as e:
-            logger.warning("WB search failed: %s", e)
+            logger.warning("WB Crawl4AI search failed: %s", e)
 
         # 2. Search Ozon
         try:
