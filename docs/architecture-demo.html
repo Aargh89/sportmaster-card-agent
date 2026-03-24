@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sportmaster Card Agent — Архитектура системы</title>
+<link href="https://fonts.googleapis.com/css2?family=Commissioner:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f8f6f3;
+  --surface: #ffffff;
+  --surface-alt: #f0ede8;
+  --border: #e0dbd4;
+  --text: #1a1714;
+  --text-dim: #7a756d;
+  --accent: #e63323;
+  --accent-dark: #c42a1c;
+  --blue: #2563eb;
+  --green: #16a34a;
+  --orange: #ea580c;
+  --purple: #7c3aed;
+  --teal: #0891b2;
+  --sm-red: #e63323;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Commissioner', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: hidden;
+}
+
+/* Hero */
+.hero {
+  padding: 60px 80px 40px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -100px; right: -100px;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(230,51,35,0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: var(--sm-red);
+  color: white;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 24px;
+}
+
+.hero h1 {
+  font-size: 48px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  margin-bottom: 12px;
+}
+
+.hero h1 span { color: var(--sm-red); }
+
+.hero .subtitle {
+  font-size: 20px;
+  font-weight: 300;
+  color: var(--text-dim);
+  max-width: 700px;
+  line-height: 1.5;
+}
+
+.hero .meta {
+  margin-top: 32px;
+  display: flex;
+  gap: 40px;
+}
+
+.meta-item {
+  text-align: center;
+}
+
+.meta-item .num {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--sm-red);
+  font-family: 'Fira Code', monospace;
+}
+
+.meta-item .label {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+
+/* Section */
+.section {
+  padding: 40px 80px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--sm-red);
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Pipeline */
+.pipeline {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  padding-bottom: 20px;
+}
+
+.pipeline-phase {
+  flex: 1;
+  min-width: 280px;
+  position: relative;
+}
+
+.pipeline-phase::after {
+  content: '→';
+  position: absolute;
+  right: -14px;
+  top: 50px;
+  font-size: 24px;
+  color: var(--border);
+  font-weight: 300;
+  z-index: 1;
+}
+
+.pipeline-phase:last-child::after { display: none; }
+
+.phase-header {
+  padding: 16px 20px;
+  border-radius: 12px 12px 0 0;
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.phase-header .phase-icon {
+  width: 28px; height: 28px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.phase-input { background: #475569; }
+.phase-uc1 { background: var(--blue); }
+.phase-uc2 { background: var(--purple); }
+.phase-output { background: var(--green); }
+
+.phase-body {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 16px;
+}
+
+.agent-card {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  transition: all 0.2s;
+  cursor: default;
+  position: relative;
+}
+
+.agent-card:hover {
+  border-color: var(--sm-red);
+  transform: translateX(4px);
+  box-shadow: 0 2px 8px rgba(230,51,35,0.1);
+}
+
+.agent-name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-name .num {
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  color: white;
+  background: var(--text-dim);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.agent-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+
+.agent-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  font-family: 'Fira Code', monospace;
+}
+
+.badge-llm { background: rgba(124,58,237,0.1); color: var(--purple); }
+.badge-rule { background: rgba(22,163,74,0.1); color: var(--green); }
+.badge-crawl { background: rgba(234,88,12,0.1); color: var(--orange); }
+
+/* Data flow */
+.flow-section {
+  padding: 40px 80px;
+}
+
+.flow-diagram {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px;
+  font-family: 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre;
+  overflow-x: auto;
+  position: relative;
+}
+
+.flow-diagram .highlight { color: var(--sm-red); font-weight: 600; }
+.flow-diagram .dim { color: var(--text-dim); }
+.flow-diagram .blue { color: var(--blue); }
+.flow-diagram .green { color: var(--green); }
+.flow-diagram .purple { color: var(--purple); }
+.flow-diagram .orange { color: var(--orange); }
+
+/* Tech stack */
+.tech-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.tech-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.2s;
+}
+
+.tech-card:hover {
+  border-color: var(--sm-red);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+
+.tech-card h4 {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.tech-card .tech-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.tech-card p {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.tech-tag {
+  display: inline-block;
+  padding: 3px 8px;
+  background: var(--surface-alt);
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: 'Fira Code', monospace;
+  margin: 2px;
+  color: var(--text);
+}
+
+/* Platform comparison */
+.platforms-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.platforms-table th {
+  background: var(--surface-alt);
+  padding: 14px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.platforms-table td {
+  padding: 12px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.platforms-table tr:last-child td { border-bottom: none; }
+
+.platforms-table .platform-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sm { color: var(--sm-red); }
+.wb { color: var(--purple); }
+.ozon { color: var(--blue); }
+
+/* Stats bar */
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 20px 0;
+}
+
+.stat-item {
+  background: var(--surface);
+  padding: 20px;
+  text-align: center;
+}
+
+.stat-item .stat-num {
+  font-size: 28px;
+  font-weight: 800;
+  font-family: 'Fira Code', monospace;
+  color: var(--text);
+}
+
+.stat-item .stat-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Source badges */
+.source-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.source-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.source-active {
+  background: rgba(22,163,74,0.08);
+  border: 1px solid rgba(22,163,74,0.2);
+  color: var(--green);
+}
+
+.source-planned {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+
+.dot-green { background: var(--green); }
+.dot-gray { background: var(--text-dim); opacity: 0.3; }
+
+/* Footer */
+.footer {
+  padding: 40px 80px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* Animations */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate { animation: fadeUp 0.6s ease forwards; }
+.delay-1 { animation-delay: 0.1s; opacity: 0; }
+.delay-2 { animation-delay: 0.2s; opacity: 0; }
+.delay-3 { animation-delay: 0.3s; opacity: 0; }
+.delay-4 { animation-delay: 0.4s; opacity: 0; }
+
+@media print {
+  body { font-size: 11px; }
+  .hero { padding: 30px 40px 20px; }
+  .section, .flow-section { padding: 20px 40px; }
+  .hero h1 { font-size: 32px; }
+  .pipeline-phase { min-width: 200px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="hero-badge">⚡ Архитектура v0.3</div>
+  <h1 class="animate">Мультиагентная система<br>управления <span>карточкой товара</span></h1>
+  <p class="subtitle animate delay-1">15 AI-агентов обогащают данные, генерируют уникальный контент для каждой площадки и проверяют качество — автоматически, за 2 минуты на товар</p>
+
+  <div class="meta animate delay-2">
+    <div class="meta-item">
+      <div class="num">15</div>
+      <div class="label">AI-агентов</div>
+    </div>
+    <div class="meta-item">
+      <div class="num">5</div>
+      <div class="label">Площадок</div>
+    </div>
+    <div class="meta-item">
+      <div class="num">190</div>
+      <div class="label">Тестов</div>
+    </div>
+    <div class="meta-item">
+      <div class="num">~2м</div>
+      <div class="label">На товар</div>
+    </div>
+    <div class="meta-item">
+      <div class="num">5</div>
+      <div class="label">LLM-вызовов</div>
+    </div>
+    <div class="meta-item">
+      <div class="num">$0.05</div>
+      <div class="label">За карточку</div>
+    </div>
+  </div>
+</div>
+
+<!-- Pipeline -->
+<div class="section">
+  <div class="section-title">Сквозной пайплайн</div>
+
+  <div class="pipeline">
+    <!-- Input -->
+    <div class="pipeline-phase animate delay-1">
+      <div class="phase-header phase-input">
+        <div class="phase-icon">📥</div>
+        ВХОД
+      </div>
+      <div class="phase-body">
+        <div class="agent-card">
+          <div class="agent-name">Excel шаблон (209 колонок)</div>
+          <div class="agent-desc">Или минимум: бренд + название + категория</div>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">0</span> Router Agent</div>
+          <div class="agent-desc">Классификация → поток (1P/3P), профиль, площадки</div>
+          <span class="agent-badge badge-rule">rule</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- UC1 -->
+    <div class="pipeline-phase animate delay-2">
+      <div class="phase-header phase-uc1">
+        <div class="phase-icon">🔍</div>
+        UC1: ОБОГАЩЕНИЕ
+      </div>
+      <div class="phase-body">
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">1.1</span> Data Validator</div>
+          <div class="agent-desc">Проверка полноты полей из Excel</div>
+          <span class="agent-badge badge-rule">rule</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">1.2</span> Visual Interpreter</div>
+          <div class="agent-desc">Анализ фото товара (Vision API)</div>
+          <span class="agent-badge badge-rule">stub</span>
+        </div>
+        <div class="agent-card" style="border-color: var(--orange)">
+          <div class="agent-name"><span class="num" style="background:var(--orange)">1.3</span> External Researcher</div>
+          <div class="agent-desc"><strong>Crawl4AI → WB</strong> реальный парсинг + LLM fallback</div>
+          <span class="agent-badge badge-crawl">crawl4ai</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">1.4</span> Internal Researcher</div>
+          <div class="agent-desc">RAG по внутренним документам</div>
+          <span class="agent-badge badge-rule">stub</span>
+        </div>
+        <div class="agent-card" style="border-color: var(--purple)">
+          <div class="agent-name"><span class="num" style="background:var(--purple)">1.5</span> Synectics Agent</div>
+          <div class="agent-desc">Креативные метафоры и ассоциации</div>
+          <span class="agent-badge badge-llm">LLM</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">1.6</span> Data Enricher</div>
+          <div class="agent-desc">Слияние данных 1.1–1.5</div>
+          <span class="agent-badge badge-rule">rule</span>
+        </div>
+        <div class="agent-card" style="border-color: var(--purple)">
+          <div class="agent-name"><span class="num" style="background:var(--purple)">1.7</span> Data Curator</div>
+          <div class="agent-desc"><strong>LLM обогащение:</strong> описание, фичи, бенефиты, SEO</div>
+          <span class="agent-badge badge-llm">LLM</span>
+        </div>
+        <div style="text-align:center; padding: 8px; font-size: 11px; color: var(--text-dim);">
+          ↓ CuratedProfile (source of truth)
+        </div>
+      </div>
+    </div>
+
+    <!-- UC2 -->
+    <div class="pipeline-phase animate delay-3">
+      <div class="phase-header phase-uc2">
+        <div class="phase-icon">✍️</div>
+        UC2: КОНТЕНТ (× площадка)
+      </div>
+      <div class="phase-body">
+        <div class="agent-card" style="border-color: var(--purple)">
+          <div class="agent-name"><span class="num" style="background:var(--purple)">2.2</span> SEO Analyst</div>
+          <div class="agent-desc"><strong>Методология 2026:</strong> разные правила WB/Ozon</div>
+          <span class="agent-badge badge-llm">LLM</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">2.3</span> Structure Planner</div>
+          <div class="agent-desc">Планирование структуры текста</div>
+          <span class="agent-badge badge-rule">rule</span>
+        </div>
+        <div class="agent-card" style="border-color: var(--purple); border-width: 2px;">
+          <div class="agent-name"><span class="num" style="background:var(--purple)">2.4</span> Content Generator</div>
+          <div class="agent-desc"><strong>Генерация уникального контента</strong> per площадка</div>
+          <span class="agent-badge badge-llm">LLM ★</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">2.5</span> Brand Compliance</div>
+          <div class="agent-desc">Проверка бренд-гайдлайнов</div>
+          <span class="agent-badge badge-rule">rule</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">2.6</span> Fact Checker</div>
+          <div class="agent-desc">Сверка контента с CuratedProfile</div>
+          <span class="agent-badge badge-rule">rule</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">2.7</span> Copy Editor</div>
+          <div class="agent-desc">Грамматика, длина, форматирование</div>
+          <span class="agent-badge badge-rule">rule</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name"><span class="num">2.8</span> Quality Controller</div>
+          <div class="agent-desc">Скоринг по 5 измерениям, порог 0.7</div>
+          <span class="agent-badge badge-rule">rule</span>
+        </div>
+        <div style="text-align:center; padding: 8px; font-size: 11px; color: var(--text-dim);">
+          ↓ PlatformContent + QualityScore
+        </div>
+      </div>
+    </div>
+
+    <!-- Output -->
+    <div class="pipeline-phase animate delay-4">
+      <div class="phase-header phase-output">
+        <div class="phase-icon">📤</div>
+        ВЫХОД (× площадка)
+      </div>
+      <div class="phase-body">
+        <div class="agent-card">
+          <div class="agent-name">SEO-оптимизированный title</div>
+          <div class="agent-desc">По формуле площадки (WB ≠ Ozon)</div>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name">Уникальное описание</div>
+          <div class="agent-desc">WB: 300-400 симв / Ozon: 800-1500 симв</div>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name">4-8 бенефитов</div>
+          <div class="agent-desc">Заголовок + описание пользы</div>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name">SEO-профиль</div>
+          <div class="agent-desc">Title, meta, 10-15 ключевых слов</div>
+        </div>
+        <div class="agent-card">
+          <div class="agent-name">Quality Score</div>
+          <div class="agent-desc">5 измерений, порог прохождения 70%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Data Flow Diagram -->
+<div class="section">
+  <div class="section-title">Параллельная генерация от исходника (v0.3)</div>
+
+  <div class="flow-diagram"><span class="dim">INPUT:</span> Excel / API / Минимальный ввод (бренд + название)
+  <span class="dim">│</span>
+  <span class="dim">▼</span>
+<span class="highlight">UC1: ОБОГАЩЕНИЕ</span> <span class="dim">(выполняется ОДИН раз)</span>
+  <span class="dim">│</span>
+  Validator → <span class="orange">Crawl4AI (WB)</span> → Researcher → <span class="purple">Synectics (LLM)</span>
+  <span class="dim">│</span>
+  DataEnricher → <span class="purple">DataCurator (LLM)</span> → <span class="highlight">CuratedProfile</span>
+  <span class="dim">│</span>
+  <span class="dim">│  ┌─────── fan-out по площадкам ────────┐</span>
+  <span class="dim">│  │              │              │        │</span>
+  <span class="dim">▼  ▼              ▼              ▼        ▼</span>
+<span class="highlight">UC2:</span> <span class="sm">SM сайт</span>      <span class="wb">Wildberries</span>    <span class="ozon">Ozon</span>     <span class="dim">Lamoda  ...</span>
+  <span class="dim">│</span>  <span class="purple">SEO(LLM)</span>      <span class="purple">SEO(LLM)</span>      <span class="purple">SEO(LLM)</span>
+  <span class="dim">│</span>  <span class="purple">Generate(LLM)</span> <span class="purple">Generate(LLM)</span> <span class="purple">Generate(LLM)</span>
+  <span class="dim">│</span>  Check+Edit    Check+Edit    Check+Edit
+  <span class="dim">│</span>  QualityScore  QualityScore  QualityScore
+  <span class="dim">│</span>
+  <span class="dim">▼</span>
+<span class="green">OUTPUT:</span> <span class="highlight">PlatformContentSet</span> <span class="dim">(уникальный контент × площадка)</span></div>
+</div>
+
+<!-- Sources -->
+<div class="section">
+  <div class="section-title">Источники обогащения</div>
+
+  <div class="source-row">
+    <div class="source-badge source-active">
+      <div class="dot dot-green"></div>
+      Excel шаблон (209 колонок)
+    </div>
+    <div class="source-badge source-active">
+      <div class="dot dot-green"></div>
+      Crawl4AI → Wildberries (headless browser)
+    </div>
+    <div class="source-badge source-active">
+      <div class="dot dot-green"></div>
+      LLM-обогащение (Claude Sonnet 4)
+    </div>
+    <div class="source-badge source-active">
+      <div class="dot dot-green"></div>
+      LLM-конкуренты (fallback при блокировке API)
+    </div>
+    <div class="source-badge source-planned">
+      <div class="dot dot-gray"></div>
+      Ozon API (заблокирован с серверных IP)
+    </div>
+    <div class="source-badge source-planned">
+      <div class="dot dot-gray"></div>
+      RAG: внутренние документы (ChromaDB)
+    </div>
+    <div class="source-badge source-planned">
+      <div class="dot dot-gray"></div>
+      Vision API: анализ фото товара
+    </div>
+  </div>
+</div>
+
+<!-- SEO Strategy -->
+<div class="section">
+  <div class="section-title">SEO-стратегия по площадкам (методология 2026)</div>
+
+  <table class="platforms-table">
+    <thead>
+      <tr>
+        <th>Параметр</th>
+        <th><span class="sm">SM сайт</span></th>
+        <th><span class="wb">Wildberries</span></th>
+        <th><span class="ozon">Ozon</span></th>
+        <th>Lamoda</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Вес текста в ранге</strong></td>
+        <td>Высокий (Яндекс SEO)</td>
+        <td>5-10% <span style="color:var(--text-dim)">(снизился!)</span></td>
+        <td><strong style="color:var(--blue)">20-40%</strong> (главный!)</td>
+        <td>Средний</td>
+      </tr>
+      <tr>
+        <td><strong>Title формула</strong></td>
+        <td>[Бренд]+[Тип]+[Модель]+[Тех]</td>
+        <td>[Бренд]+[Тип]+[Хар-ка]+[Сценарий]</td>
+        <td>[Тип]+[Бренд]+[Модель]+[Атрибуты]</td>
+        <td>[Бренд]+[Модель]+[Тип]</td>
+      </tr>
+      <tr>
+        <td><strong>Title длина</strong></td>
+        <td>до 150 символов</td>
+        <td><strong>50-70</strong> символов</td>
+        <td><strong>40-80</strong> символов</td>
+        <td>до 120 символов</td>
+      </tr>
+      <tr>
+        <td><strong>Описание</strong></td>
+        <td>до 3000 символов</td>
+        <td><strong>300-400</strong> (меньше = лучше)</td>
+        <td><strong>800-1500</strong> (больше = лучше)</td>
+        <td>500-1000 (lifestyle)</td>
+      </tr>
+      <tr>
+        <td><strong>HTML</strong></td>
+        <td>✅ h3, ul, strong</td>
+        <td>❌</td>
+        <td>✅ Rich Content (+20 баллов)</td>
+        <td>❌</td>
+      </tr>
+      <tr>
+        <td><strong>Тон</strong></td>
+        <td>Профессиональный</td>
+        <td>Информативный, краткий</td>
+        <td>Подробный, детальный</td>
+        <td>Lifestyle, модный</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Tech Stack -->
+<div class="section">
+  <div class="section-title">Технологический стек</div>
+
+  <div class="tech-grid">
+    <div class="tech-card">
+      <div class="tech-label">Фреймворк агентов</div>
+      <h4>CrewAI 1.5</h4>
+      <p>Ролевые агенты, задачи, Pydantic structured output, dual-mode (stub/LLM)</p>
+      <div style="margin-top:8px"><span class="tech-tag">Python 3.12</span> <span class="tech-tag">Pydantic v2</span></div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-label">LLM провайдер</div>
+      <h4>Nevel API</h4>
+      <p>OpenAI-совместимый API с маскированием ПДн. Модели: Claude Sonnet 4, GPT-4o</p>
+      <div style="margin-top:8px"><span class="tech-tag">nevel/sonnet4</span> <span class="tech-tag">nevel/gpt4o</span></div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-label">Парсинг маркетплейсов</div>
+      <h4>Crawl4AI</h4>
+      <p>Headless Chromium для WB. Обходит rate limit и anti-bot. JS-рендеринг страниц</p>
+      <div style="margin-top:8px"><span class="tech-tag">Playwright</span> <span class="tech-tag">BeautifulSoup</span></div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-label">Веб-интерфейс</div>
+      <h4>FastAPI + SSE</h4>
+      <p>Real-time dashboard с отображением прогресса каждого агента. Server-Sent Events</p>
+      <div style="margin-top:8px"><span class="tech-tag">Uvicorn</span> <span class="tech-tag">HTML/JS</span></div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-label">Тестирование</div>
+      <h4>190 тестов (TDD)</h4>
+      <p>pytest, 100% pass rate. Все агенты работают в stub-режиме без API для CI/CD</p>
+      <div style="margin-top:8px"><span class="tech-tag">pytest</span> <span class="tech-tag">Playwright</span></div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-label">Конфигурация</div>
+      <h4>YAML configs</h4>
+      <p>Агенты, платформы, промпты — всё в YAML. Не нужно менять код для настройки</p>
+      <div style="margin-top:8px"><span class="tech-tag">agents.yaml</span> <span class="tech-tag">platforms/*.yaml</span> <span class="tech-tag">prompts/*.yaml</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="section">
+  <div class="section-title">Метрики проекта</div>
+
+  <div class="stats-bar">
+    <div class="stat-item">
+      <div class="stat-num">15</div>
+      <div class="stat-label">Агентов</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">24</div>
+      <div class="stat-label">Pydantic моделей</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">190</div>
+      <div class="stat-label">Тестов</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">15</div>
+      <div class="stat-label">Промпт-шаблонов</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">5</div>
+      <div class="stat-label">Площадок</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">3</div>
+      <div class="stat-label">Flows</div>
+    </div>
+  </div>
+</div>
+
+<!-- Roadmap -->
+<div class="section">
+  <div class="section-title">Roadmap</div>
+
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+    <div class="tech-card" style="border-left: 4px solid var(--green);">
+      <div class="tech-label" style="color: var(--green);">✅ Готово</div>
+      <h4>Phase 1-2.5</h4>
+      <p>15 агентов, Nevel API, Crawl4AI WB, SEO методология 2026, Dashboard, параллельная генерация</p>
+    </div>
+    <div class="tech-card" style="border-left: 4px solid var(--orange);">
+      <div class="tech-label" style="color: var(--orange);">🔜 Следующий</div>
+      <h4>Phase 3</h4>
+      <p>3P-поток (валидация контента продавцов), пост-генерационные агенты 2.13-2.16</p>
+    </div>
+    <div class="tech-card" style="border-left: 4px solid var(--blue);">
+      <div class="tech-label" style="color: var(--blue);">📋 Запланировано</div>
+      <h4>Phase 4</h4>
+      <p>RAG по внутренним документам, Vision API для фото, Ozon через proxy, Celery batch</p>
+    </div>
+    <div class="tech-card" style="border-left: 4px solid var(--purple);">
+      <div class="tech-label" style="color: var(--purple);">🎯 Целевое</div>
+      <h4>Phase 5+</h4>
+      <p>UC4 визуальный GenAI, HITL чекпоинты, полная автоматизация 15000 МЦМ/год</p>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <div>Sportmaster Card Agent — Архитектура v0.3 · Март 2026</div>
+  <div><span class="tech-tag">github.com/Aargh89/sportmaster-card-agent</span></div>
+</div>
+
+</body>
+</html>
