@@ -280,7 +280,7 @@ def _run_pipeline(session_id: str, product_data: dict, platforms: list[str]):
     enricher = DataEnricherAgent()
     t0 = time.time()
     all_prov = val_prov + vis_prov + ext_prov + int_prov
-    enriched = enricher.enrich(product, val_report, benchmark, insights, creative, all_prov)
+    enriched = enricher.enrich(product, val_report, benchmark, all_prov, insights, creative)
     _send_event(session_id, "agent_done", {
         "agent": "DataEnricher", "step": 7,
         "duration": round(time.time() - t0, 1),
