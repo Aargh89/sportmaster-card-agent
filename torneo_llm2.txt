@@ -1,0 +1,81 @@
+{
+  "target": {
+    "name": "Torneo T-165 Shape",
+    "brand": "Torneo",
+    "price_range": "25000-35000",
+    "specs": {
+      "power": "1.25 HP",
+      "speed": "12 km/h",
+      "belt": "40x110 cm",
+      "max_weight": "100 kg"
+    }
+  },
+  "competitors": [
+    {
+      "platform": "wb",
+      "brand": "House Fit",
+      "name": "HT-9147HP",
+      "price": 28900,
+      "rating": 4.3,
+      "specs": {
+        "power": "1.5 HP",
+        "speed": "12 km/h",
+        "belt": "40x110 cm",
+        "max_weight": "110 kg"
+      }
+    },
+    {
+      "platform": "ozon",
+      "brand": "Sport Elite",
+      "name": "SE-T1504",
+      "price": 31500,
+      "rating": 4.1,
+      "specs": {
+        "power": "1.25 HP",
+        "speed": "10 km/h",
+        "belt": "38x105 cm",
+        "max_weight": "100 kg"
+      }
+    },
+    {
+      "platform": "wb",
+      "brand": "Bronze Gym",
+      "name": "T800 LC",
+      "price": 33900,
+      "rating": 4.6,
+      "specs": {
+        "power": "1.5 HP",
+        "speed": "14 km/h",
+        "belt": "42x112 cm",
+        "max_weight": "110 kg"
+      }
+    },
+    {
+      "platform": "ozon",
+      "brand": "Oxygen",
+      "name": "Fitness New Classic Cupid",
+      "price": 27300,
+      "rating": 4.2,
+      "specs": {
+        "power": "1.25 HP",
+        "speed": "12 km/h",
+        "belt": "39x108 cm",
+        "max_weight": "100 kg"
+      }
+    },
+    {
+      "platform": "wb",
+      "brand": "CardioPower",
+      "name": "T15",
+      "price": 29800,
+      "rating": 4.4,
+      "specs": {
+        "power": "1.25 HP",
+        "speed": "12 km/h",
+        "belt": "40x110 cm",
+        "max_weight": "100 kg"
+      }
+    }
+  ],
+  "summary": "Беговая дорожка начального уровня для домашнего использования с базовыми характеристиками. Конкуренты предлагают схожий функционал в том же ценовом сегменте, некоторые с улучшенными характеристиками."
+}

@@ -1,0 +1,56 @@
+```json
+{
+  "competitors": [
+    {
+      "platform": "wb",
+      "brand": "Torneo",
+      "name": "Torneo T-205 Sprint",
+      "price": 54990,
+      "rating": 4.7,
+      "features": ["foldable", "LCD display", "heart rate monitor"]
+    },
+    {
+      "platform": "wb",
+      "brand": "Xiaomi",
+      "name": "Xiaomi WalkingPad C1",
+      "price": 29990,
+      "rating": 4.6,
+      "features": ["compact", "remote control", "quiet"]
+    },
+    {
+      "platform": "ozon",
+      "brand": "Proxima",
+      "name": "Proxima Laura",
+      "price": 59900,
+      "rating": 4.8,
+      "features": ["Bluetooth", "auto incline", "shock absorption"]
+    },
+    {
+      "platform": "ozon",
+      "brand": "Carbon",
+      "name": "Carbon T906",
+      "price": 36990,
+      "rating": 4.4,
+      "features": ["manual incline", "foldable", "LCD display"]
+    },
+    {
+      "platform": "wb",
+      "brand": "UnixFit",
+      "name": "UnixFit ST-530M",
+      "price": 45990,
+      "rating": 4.5,
+      "features": ["MP3 support", "soft drop system", "speed control"]
+    },
+    {
+      "platform": "ozon",
+      "brand": "Torneo",
+      "name": "Torneo Inita T-150",
+      "price": 28990,
+      "rating": 4.3,
+      "features": ["manual incline", "LCD display", "space saver"]
+    }
+  ],
+  "avg_price": 42725,
+  "summary": "The average price of competitor treadmills for Torneo T-165 Shape is 42,725 RUB, with options from brands like Torneo, Xiaomi, Proxima, Carbon, and UnixFit available on Wildberries and Ozon."
+}
+```
